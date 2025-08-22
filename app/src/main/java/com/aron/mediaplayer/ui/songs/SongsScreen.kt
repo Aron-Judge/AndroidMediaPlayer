@@ -1,3 +1,4 @@
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
 package com.aron.mediaplayer.ui.songs
 
 import android.Manifest
@@ -36,28 +37,42 @@ fun SongsScreen() {
     var songs by remember { mutableStateOf<List<Song>>(emptyList()) }
     var hasPermission by remember { mutableStateOf(false) }
 
-    val permission =
+    val mediaPermission =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.READ_MEDIA_AUDIO
         } else {
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
 
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { granted ->
-            hasPermission = granted
-            if (granted) songs = loadSongs(context)
-        }
-    )
+    val notifPermission =
+        if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null
+
+    val launcherMultiple = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val mediaGranted = results[mediaPermission] == true
+        val notifGranted = notifPermission?.let { results[it] == true } ?: true
+        hasPermission = mediaGranted && notifGranted
+        if (hasPermission) songs = loadSongs(context)
+    }
 
     LaunchedEffect(Unit) {
-        when (PackageManager.PERMISSION_GRANTED) {
-            ContextCompat.checkSelfPermission(context, permission) -> {
-                hasPermission = true
-                songs = loadSongs(context)
-            }
-            else -> launcher.launch(permission)
+        val permissionsToRequest = mutableListOf<String>()
+
+        if (ContextCompat.checkSelfPermission(context, mediaPermission) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(mediaPermission)
+        }
+        if (notifPermission != null &&
+            ContextCompat.checkSelfPermission(context, notifPermission) != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionsToRequest.add(notifPermission)
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            launcherMultiple.launch(permissionsToRequest.toTypedArray())
+        } else {
+            hasPermission = true
+            songs = loadSongs(context)
         }
     }
 
@@ -66,7 +81,7 @@ fun SongsScreen() {
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            Text("Permission required to display songs")
+            Text("Permissions required to display songs and post notifications")
         }
     } else {
         LazyColumn(

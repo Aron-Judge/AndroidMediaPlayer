@@ -2,7 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     id("org.jetbrains.kotlin.kapt")
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.0" // match this to your Kotlin version in Android Studio
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
 }
 
 android {
@@ -15,7 +15,6 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -43,7 +42,7 @@ android {
 }
 
 dependencies {
-    // Compose BOM keeps all Compose artifacts on the same version
+    // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
 
     // Core Compose
@@ -56,6 +55,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx")
 
+    // Optional: ViewModel + Compose integration for Step 6
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose")
+
     // Debug tooling
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-tooling-preview")
@@ -65,8 +67,19 @@ dependencies {
     kapt("androidx.room:room-compiler:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
 
-    // Media playback service support
+    // Coroutines for background DB calls
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Media playback
     implementation("androidx.media:media:1.7.0")
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.media3:media3-session:1.4.1")
+
+    // Image loading
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+    kapt("com.github.bumptech.glide:compiler:4.16.0")
 
     // Core AndroidX + Material
     implementation(libs.androidx.core.ktx)
@@ -79,10 +92,4 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-
-    implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-ui:1.4.1")
-    implementation("androidx.media3:media3-session:1.4.1")
-    implementation("com.github.bumptech.glide:glide:4.16.0")
-    kapt("com.github.bumptech.glide:compiler:4.16.0")
 }

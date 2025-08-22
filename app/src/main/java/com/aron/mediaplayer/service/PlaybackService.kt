@@ -18,8 +18,12 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.aron.mediaplayer.R
+import com.aron.mediaplayer.data.AppDatabase
+import com.aron.mediaplayer.data.PlaylistTrack
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.Target
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 @UnstableApi
 class PlaybackService : MediaSessionService() {
@@ -31,15 +35,21 @@ class PlaybackService : MediaSessionService() {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "playback_channel"
 
-        private const val ACTION_PLAY = "com.aron.mediaplayer.PLAY"
+        const val ACTION_PLAY = "com.aron.mediaplayer.PLAY"
         private const val ACTION_PAUSE = "com.aron.mediaplayer.PAUSE"
         private const val ACTION_NEXT = "com.aron.mediaplayer.NEXT"
         private const val ACTION_PREVIOUS = "com.aron.mediaplayer.PREVIOUS"
+
+        const val ACTION_ADD_TO_PLAYLIST = "com.aron.mediaplayer.ADD_TO_PLAYLIST"
+        const val EXTRA_URI = "mediaUri"
+        const val EXTRA_TITLE = "title"
+        const val EXTRA_ARTIST = "artist"
+        const val EXTRA_DURATION = "duration"
+        const val EXTRA_ARTWORK_URI = "artworkUri"
     }
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            // Keep notification icon in sync with actual state
             if (Build.VERSION.SDK_INT < 33 ||
                 ContextCompat.checkSelfPermission(
                     this@PlaybackService,
@@ -57,7 +67,17 @@ class PlaybackService : MediaSessionService() {
         player = ExoPlayer.Builder(this).build().apply {
             addListener(playerListener)
         }
-        mediaSession = MediaSession.Builder(this, player).build()
+        mediaSession = MediaSession.Builder(this, player)
+            .setSessionActivity(
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    Intent(this, Class.forName("com.aron.mediaplayer.MainActivity")),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+            )
+            .build()
+
         createNotificationChannel()
     }
 
@@ -73,11 +93,66 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+
+        // If queue is empty at startup, load snapshot from Flow
+        if (player.mediaItemCount == 0) {
+            val dao = AppDatabase.getInstance(applicationContext).playlistDao()
+            val playlistTracks = runBlocking { dao.getAll().first() }
+
+            if (playlistTracks.isNotEmpty()) {
+                val mediaItems = playlistTracks.map { track ->
+                    MediaItem.Builder()
+                        .setUri(track.uri)
+                        .setMediaMetadata(
+                            androidx.media3.common.MediaMetadata.Builder()
+                                .setTitle(track.title)
+                                .setArtist(track.artist)
+                                .setArtworkUri(track.artworkUri?.let { Uri.parse(it) })
+                                .build()
+                        )
+                        .build()
+                }
+                player.setMediaItems(mediaItems)
+                player.prepare()
+                player.play()
+            }
+        }
+
+        // Add a track to playlist from an external intent
+        if (intent?.action == ACTION_ADD_TO_PLAYLIST) {
+            val dao = AppDatabase.getInstance(applicationContext).playlistDao()
+            runBlocking {
+                dao.insert(
+                    PlaylistTrack(
+                        uri = intent.getStringExtra(EXTRA_URI) ?: return@runBlocking,
+                        title = intent.getStringExtra(EXTRA_TITLE) ?: "Unknown Title",
+                        artist = intent.getStringExtra(EXTRA_ARTIST) ?: "Unknown Artist",
+                        duration = intent.getLongExtra(EXTRA_DURATION, 0L),
+                        artworkUri = intent.getStringExtra(EXTRA_ARTWORK_URI)
+                    )
+                )
+            }
+        }
+
+        // Core control actions
         when (intent?.action) {
-            ACTION_PLAY -> player.play()
+            ACTION_PLAY -> {
+                val uri = intent.getStringExtra(EXTRA_URI)
+                if (uri != null) {
+                    val mediaItem = MediaItem.Builder()
+                        .setUri(uri)
+                        .build()
+                    player.setMediaItem(mediaItem)
+                    player.prepare()
+                    player.play()
+                } else {
+                    player.play()
+                }
+            }
             ACTION_PAUSE -> player.pause()
             ACTION_NEXT -> player.seekToNextMediaItem()
             ACTION_PREVIOUS -> handlePrevious()
+            Intent.ACTION_MEDIA_BUTTON -> { /* handled by MediaSession */ }
         }
 
         if (Build.VERSION.SDK_INT < 33 ||
@@ -89,33 +164,9 @@ class PlaybackService : MediaSessionService() {
             startForeground(NOTIFICATION_ID, buildLoadingNotification())
         }
 
-        intent?.getStringExtra("mediaUri")?.let { uriStr ->
-            val mediaItem = MediaItem.fromUri(uriStr)
-            player.setMediaItem(mediaItem)
-
-            // Add extras so ⏮/⏭ have valid targets
-            val extra1 = MediaItem.fromUri("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3")
-            val extra2 = MediaItem.fromUri("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3")
-            player.addMediaItem(extra1)
-            player.addMediaItem(extra2)
-
-            player.prepare()
-            player.play()
-
-            if (Build.VERSION.SDK_INT < 33 ||
-                ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                nm.notify(NOTIFICATION_ID, buildNotification())
-            }
-        }
         return super.onStartCommand(intent, flags, startId)
     }
 
-    /** Smarter ⏮ handling */
     private fun handlePrevious() {
         if (player.currentPosition > 3000) {
             player.seekTo(0)
@@ -148,8 +199,7 @@ class PlaybackService : MediaSessionService() {
                 .load(artUri)
                 .submit(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL)
                 .get()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) { }
 
         val playIntent = PendingIntent.getService(
             this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_PLAY),

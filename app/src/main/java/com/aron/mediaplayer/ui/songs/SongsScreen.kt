@@ -22,7 +22,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.aron.mediaplayer.data.AppDatabase
+import com.aron.mediaplayer.data.PlaylistTrack
 import com.aron.mediaplayer.service.PlaybackService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 data class Song(
     val id: Long,
@@ -58,7 +63,6 @@ fun SongsScreen() {
 
     LaunchedEffect(Unit) {
         val permissionsToRequest = mutableListOf<String>()
-
         if (ContextCompat.checkSelfPermission(context, mediaPermission) != PackageManager.PERMISSION_GRANTED) {
             permissionsToRequest.add(mediaPermission)
         }
@@ -67,7 +71,6 @@ fun SongsScreen() {
         ) {
             permissionsToRequest.add(notifPermission)
         }
-
         if (permissionsToRequest.isNotEmpty()) {
             launcherMultiple.launch(permissionsToRequest.toTypedArray())
         } else {
@@ -102,8 +105,23 @@ fun SongItem(song: Song, context: Context) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
+                // 1️⃣ Insert into playlist DB
+                val dao = AppDatabase.getInstance(context).playlistDao()
+                CoroutineScope(Dispatchers.IO).launch {
+                    dao.insert(
+                        PlaylistTrack(
+                            uri = song.contentUri.toString(),
+                            title = song.title,
+                            artist = song.artist,
+                            duration = 0L, // Optional: query real duration
+                            artworkUri = null
+                        )
+                    )
+                }
+                // 2️⃣ Send ACTION_PLAY intent to service
                 val intent = Intent(context, PlaybackService::class.java).apply {
-                    putExtra("mediaUri", song.contentUri.toString())
+                    action = PlaybackService.ACTION_PLAY
+                    putExtra(PlaybackService.EXTRA_URI, song.contentUri.toString())
                 }
                 ContextCompat.startForegroundService(context, intent)
             }
@@ -122,13 +140,11 @@ private fun loadSongs(context: Context): List<Song> {
         } else {
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
         }
-
     val projection = arrayOf(
         MediaStore.Audio.Media._ID,
         MediaStore.Audio.Media.TITLE,
         MediaStore.Audio.Media.ARTIST
     )
-
     val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
 
     context.contentResolver.query(

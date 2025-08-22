@@ -41,5 +41,17 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <receiver android:name="androidx.media.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Explicitly declare media session service for tighter OS integration -->
+        <meta-data
+            android:name="android.media.session"
+            android:resource="@xml/media_session_service" />
+
     </application>
 </manifest>

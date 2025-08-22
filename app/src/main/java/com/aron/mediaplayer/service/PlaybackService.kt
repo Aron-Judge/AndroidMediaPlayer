@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -24,6 +25,11 @@ class PlaybackService : MediaSessionService() {
     companion object {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "playback_channel"
+
+        private const val ACTION_PLAY = "com.aron.mediaplayer.PLAY"
+        private const val ACTION_PAUSE = "com.aron.mediaplayer.PAUSE"
+        private const val ACTION_NEXT = "com.aron.mediaplayer.NEXT"
+        private const val ACTION_PREVIOUS = "com.aron.mediaplayer.PREVIOUS"
     }
 
     override fun onCreate() {
@@ -44,7 +50,15 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // ✅ Foreground promotion guarded by POST_NOTIFICATIONS check
+        // Handle action buttons
+        when (intent?.action) {
+            ACTION_PLAY -> player.play()
+            ACTION_PAUSE -> player.pause()
+            ACTION_NEXT -> player.seekToNextMediaItem()
+            ACTION_PREVIOUS -> player.seekToPreviousMediaItem()
+        }
+
+        // Foreground promotion
         if (Build.VERSION.SDK_INT < 33 ||
             ContextCompat.checkSelfPermission(
                 this,
@@ -54,13 +68,12 @@ class PlaybackService : MediaSessionService() {
             startForeground(NOTIFICATION_ID, buildLoadingNotification())
         }
 
+        // Start playback if mediaUri is provided
         intent?.getStringExtra("mediaUri")?.let { uriStr ->
             val mediaItem = MediaItem.fromUri(uriStr)
             player.setMediaItem(mediaItem)
             player.prepare()
             player.play()
-
-            // Update notification only if permission granted
             if (Build.VERSION.SDK_INT < 33 ||
                 ContextCompat.checkSelfPermission(
                     this,
@@ -86,16 +99,49 @@ class PlaybackService : MediaSessionService() {
         val title = currentItem?.mediaMetadata?.title ?: "Playing audio"
         val artist = currentItem?.mediaMetadata?.artist ?: ""
 
+        // Intents for actions
+        val playIntent = PendingIntent.getService(
+            this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_PLAY),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val pauseIntent = PendingIntent.getService(
+            this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_PAUSE),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val nextIntent = PendingIntent.getService(
+            this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_NEXT),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val prevIntent = PendingIntent.getService(
+            this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_PREVIOUS),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(artist)
-            .setSmallIcon(android.R.drawable.ic_media_play) // placeholder
+            .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .addAction(
+                android.R.drawable.ic_media_previous,
+                "Previous",
+                prevIntent
+            )
+            .addAction(
+                if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                if (player.isPlaying) "Pause" else "Play",
+                if (player.isPlaying) pauseIntent else playIntent
+            )
+            .addAction(
+                android.R.drawable.ic_media_next,
+                "Next",
+                nextIntent
+            )
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(mediaSession?.sessionCompatToken)
-                // Removed .setShowActionsInCompactView(0) until actions are added
+                    .setShowActionsInCompactView(0, 1, 2)
             )
             .build()
     }

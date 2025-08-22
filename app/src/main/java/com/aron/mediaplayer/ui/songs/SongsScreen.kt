@@ -3,6 +3,7 @@ package com.aron.mediaplayer.ui.songs
 import android.Manifest
 import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -20,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.aron.mediaplayer.service.PlaybackService
 
 data class Song(
     val id: Long,
@@ -73,19 +75,22 @@ fun SongsScreen() {
                 .padding(8.dp)
         ) {
             items(songs) { song ->
-                SongItem(song)
+                SongItem(song, context)
             }
         }
     }
 }
 
 @Composable
-fun SongItem(song: Song) {
+fun SongItem(song: Song, context: Context) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                // TODO: Hook into your playback service later
+                val intent = Intent(context, PlaybackService::class.java).apply {
+                    putExtra("mediaUri", song.contentUri.toString())
+                }
+                ContextCompat.startForegroundService(context, intent)
             }
             .padding(vertical = 8.dp)
     ) {

@@ -55,15 +55,23 @@ class PlaybackService : MediaSessionService() {
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            if (Build.VERSION.SDK_INT < 33 ||
-                ContextCompat.checkSelfPermission(
-                    this@PlaybackService,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                nm.notify(NOTIFICATION_ID, buildNotification())
-            }
+            maybeUpdateNotification()
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            maybeUpdateNotification()
+        }
+    }
+
+    private fun maybeUpdateNotification() {
+        if (Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, buildNotification())
         }
     }
 
@@ -166,6 +174,7 @@ class PlaybackService : MediaSessionService() {
 
         return super.onStartCommand(intent, flags, startId)
     }
+
     // ——— Helpers ———
 
     private fun buildMediaItems(tracks: List<PlaylistTrack>): List<MediaItem> =
@@ -249,6 +258,9 @@ class PlaybackService : MediaSessionService() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
+    // Simple in-memory cache for artwork bitmaps
+    private val artworkCache = mutableMapOf<Uri, Bitmap?>()
+
     private fun buildNotification(): Notification {
         val currentItem = player.currentMediaItem
         val mm = currentItem?.mediaMetadata
@@ -259,52 +271,68 @@ class PlaybackService : MediaSessionService() {
         val artUri: Uri = mm?.artworkUri
             ?: Uri.parse("https://via.placeholder.com/300.png?text=No+Artwork")
 
-        var artBitmap: Bitmap? = null
-        try {
-            artBitmap = Glide.with(this)
-                .asBitmap()
-                .load(artUri)
-                .submit(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL)
-                .get()
-        } catch (_: Exception) { }
-
-        val playIntent = PendingIntent.getService(
-            this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_PLAY),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val pauseIntent = PendingIntent.getService(
-            this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_PAUSE),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val nextIntent = PendingIntent.getService(
-            this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_NEXT),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val prevIntent = PendingIntent.getService(
-            this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_PREVIOUS),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(artist)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setLargeIcon(artBitmap)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .addAction(android.R.drawable.ic_media_previous, "Previous", prevIntent)
+            .addAction(android.R.drawable.ic_media_previous, "Previous",
+                PendingIntent.getService(this, 0,
+                    Intent(this, PlaybackService::class.java).setAction(ACTION_PREVIOUS),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             .addAction(
                 if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
                 if (player.isPlaying) "Pause" else "Play",
-                if (player.isPlaying) pauseIntent else playIntent
+                if (player.isPlaying)
+                    PendingIntent.getService(this, 0,
+                        Intent(this, PlaybackService::class.java).setAction(ACTION_PAUSE),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                else
+                    PendingIntent.getService(this, 0,
+                        Intent(this, PlaybackService::class.java).setAction(ACTION_PLAY),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             )
-            .addAction(android.R.drawable.ic_media_next, "Next", nextIntent)
+            .addAction(android.R.drawable.ic_media_next, "Next",
+                PendingIntent.getService(this, 0,
+                    Intent(this, PlaybackService::class.java).setAction(ACTION_NEXT),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(mediaSession?.sessionCompatToken)
                     .setShowActionsInCompactView(0, 1, 2)
             )
-            .build()
+
+        // If cached, use immediately
+        artworkCache[artUri]?.let { cachedBmp ->
+            return builder.setLargeIcon(cachedBmp).build()
+        }
+
+        // Otherwise load asynchronously
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val bmp = Glide.with(this@PlaybackService)
+                    .asBitmap()
+                    .load(artUri)
+                    .submit(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL)
+                    .get()
+                // Cache result for reuse
+                artworkCache[artUri] = bmp
+                withContext(Dispatchers.Main) {
+                    val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                    nm.notify(NOTIFICATION_ID, builder.setLargeIcon(bmp).build())
+                }
+            } catch (_: Exception) {
+                artworkCache[artUri] = null
+                withContext(Dispatchers.Main) {
+                    val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                    nm.notify(NOTIFICATION_ID, builder.build())
+                }
+            }
+        }
+
+        // Return the text-only notification immediately
+        return builder.build()
     }
 
     private fun createNotificationChannel() {

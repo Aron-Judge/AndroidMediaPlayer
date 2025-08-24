@@ -3,27 +3,40 @@ package com.aron.mediaplayer
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlaylistPlay
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aron.mediaplayer.data.AppDatabase
-import com.aron.mediaplayer.viewmodel.PlaylistViewModel
 import com.aron.mediaplayer.ui.screens.PlaylistsScreen
 import com.aron.mediaplayer.ui.songs.SongsScreen
+import com.aron.mediaplayer.viewmodel.PlaylistViewModel
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.mutableStateOf
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Force dark mode globally for any Views or system UI
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+
         setContent {
-            MaterialTheme {
+            MediaPlayerDarkTheme {
                 MediaPlayerApp()
             }
         }
@@ -51,17 +64,22 @@ fun MediaPlayerApp() {
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                containerColor = Color.Black,
+                contentColor = Color.White
+            ) {
                 tabs.forEachIndexed { index, title ->
                     NavigationBarItem(
                         selected = selectedTab.value == index,
                         onClick = { selectedTab.value = index },
                         label = { Text(title) },
-                        icon = { Icon(icons[index], contentDescription = title) }
+                        icon = { androidx.compose.material3.Icon(icons[index], contentDescription = title) }
                     )
                 }
             }
-        }
+        },
+        containerColor = Color.Black,
+        contentColor = Color.White
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
             when (selectedTab.value) {
@@ -70,4 +88,21 @@ fun MediaPlayerApp() {
             }
         }
     }
+}
+
+@Composable
+fun MediaPlayerDarkTheme(content: @Composable () -> Unit) {
+    val colorScheme = darkColorScheme(
+        primary = Color(0xFF1DB954), // Spotify green
+        onPrimary = Color.White,
+        background = Color.Black,
+        surface = Color.Black,
+        onBackground = Color.White,
+        onSurface = Color.White
+    )
+
+    MaterialTheme(
+        colorScheme = colorScheme,
+        content = content
+    )
 }

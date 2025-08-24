@@ -93,34 +93,23 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val dao = AppDatabase.getInstance(applicationContext).playlistDao()
 
-        // If queue is empty at startup, load snapshot from Flow
+        // If queue is empty at startup, load snapshot
         if (player.mediaItemCount == 0) {
-            val dao = AppDatabase.getInstance(applicationContext).playlistDao()
             val playlistTracks = runBlocking { dao.getAll().first() }
-
             if (playlistTracks.isNotEmpty()) {
-                val mediaItems = playlistTracks.map { track ->
-                    MediaItem.Builder()
-                        .setUri(track.uri)
-                        .setMediaMetadata(
-                            androidx.media3.common.MediaMetadata.Builder()
-                                .setTitle(track.title)
-                                .setArtist(track.artist)
-                                .setArtworkUri(track.artworkUri?.let { Uri.parse(it) })
-                                .build()
-                        )
-                        .build()
-                }
-                player.setMediaItems(mediaItems)
-                player.prepare()
-                player.play()
+                loadPlaylistIntoPlayer(
+                    playlistTracks,
+                    startIndex = 0,
+                    startPositionMs = 0,
+                    autoPlay = true
+                )
             }
         }
 
-        // Add a track to playlist from an external intent
+        // Add track to playlist
         if (intent?.action == ACTION_ADD_TO_PLAYLIST) {
-            val dao = AppDatabase.getInstance(applicationContext).playlistDao()
             runBlocking {
                 dao.insert(
                     PlaylistTrack(
@@ -134,25 +123,31 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
-        // Core control actions
+        // Core controls
         when (intent?.action) {
             ACTION_PLAY -> {
                 val uri = intent.getStringExtra(EXTRA_URI)
                 if (uri != null) {
-                    val mediaItem = MediaItem.Builder()
-                        .setUri(uri)
-                        .build()
-                    player.setMediaItem(mediaItem)
-                    player.prepare()
-                    player.play()
+                    val playlistTracks = runBlocking { dao.getAll().first() }
+                    if (playlistTracks.isNotEmpty()) {
+                        val index = playlistTracks.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
+                        loadPlaylistIntoPlayer(
+                            playlistTracks,
+                            startIndex = index,
+                            startPositionMs = 0L,
+                            autoPlay = true
+                        )
+                    }
                 } else {
                     player.play()
                 }
             }
+
             ACTION_PAUSE -> player.pause()
             ACTION_NEXT -> player.seekToNextMediaItem()
             ACTION_PREVIOUS -> handlePrevious()
-            Intent.ACTION_MEDIA_BUTTON -> { /* handled by MediaSession */ }
+            Intent.ACTION_MEDIA_BUTTON -> { /* handled by MediaSession */
+            }
         }
 
         if (Build.VERSION.SDK_INT < 33 ||
@@ -165,6 +160,30 @@ class PlaybackService : MediaSessionService() {
         }
 
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    private fun loadPlaylistIntoPlayer(
+        playlistTracks: List<PlaylistTrack>,
+        startIndex: Int,
+        startPositionMs: Long,
+        autoPlay: Boolean
+    ) {
+        val mediaItems = playlistTracks.map { track ->
+            MediaItem.Builder()
+                .setUri(track.uri)
+                .setMediaMetadata(
+                    androidx.media3.common.MediaMetadata.Builder()
+                        .setTitle(track.title)
+                        .setArtist(track.artist)
+                        .setArtworkUri(track.artworkUri?.let { Uri.parse(it) })
+                        .build()
+                )
+                .build()
+        }
+        player.setMediaItems(mediaItems)
+        player.seekTo(startIndex, startPositionMs)
+        player.prepare()
+        if (autoPlay) player.play()
     }
 
     private fun handlePrevious() {
@@ -199,7 +218,8 @@ class PlaybackService : MediaSessionService() {
                 .load(artUri)
                 .submit(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL)
                 .get()
-        } catch (_: Exception) { }
+        } catch (_: Exception) {
+        }
 
         val playIntent = PendingIntent.getService(
             this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_PLAY),

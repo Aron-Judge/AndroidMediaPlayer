@@ -22,14 +22,19 @@ import com.aron.mediaplayer.data.AppDatabase
 import com.aron.mediaplayer.data.PlaylistTrack
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.Target
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 
 @UnstableApi
 class PlaybackService : MediaSessionService() {
 
     private lateinit var player: ExoPlayer
     private var mediaSession: MediaSession? = null
+
+    // Coroutine scope for DB observation
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var playlistJob: Job? = null
 
     companion object {
         private const val NOTIFICATION_ID = 1
@@ -79,9 +84,19 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         createNotificationChannel()
+
+        // Start live playlist sync
+        val dao = AppDatabase.getInstance(applicationContext).playlistDao()
+        playlistJob = serviceScope.launch {
+            dao.getAll().collectLatest { tracks ->
+                syncQueueWith(tracks)
+            }
+        }
     }
 
     override fun onDestroy() {
+        playlistJob?.cancel()
+        serviceScope.cancel()
         player.removeListener(playerListener)
         mediaSession?.release()
         player.release()
@@ -95,20 +110,14 @@ class PlaybackService : MediaSessionService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val dao = AppDatabase.getInstance(applicationContext).playlistDao()
 
-        // If queue is empty at startup, load snapshot
+        // Cold start fast-load
         if (player.mediaItemCount == 0) {
             val playlistTracks = runBlocking { dao.getAll().first() }
             if (playlistTracks.isNotEmpty()) {
-                loadPlaylistIntoPlayer(
-                    playlistTracks,
-                    startIndex = 0,
-                    startPositionMs = 0,
-                    autoPlay = true
-                )
+                loadPlaylistIntoPlayer(playlistTracks, startIndex = 0, startPositionMs = 0, autoPlay = true)
             }
         }
 
-        // Add track to playlist
         if (intent?.action == ACTION_ADD_TO_PLAYLIST) {
             runBlocking {
                 dao.insert(
@@ -123,7 +132,6 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
-        // Core controls
         when (intent?.action) {
             ACTION_PLAY -> {
                 val uri = intent.getStringExtra(EXTRA_URI)
@@ -142,12 +150,9 @@ class PlaybackService : MediaSessionService() {
                     player.play()
                 }
             }
-
             ACTION_PAUSE -> player.pause()
             ACTION_NEXT -> player.seekToNextMediaItem()
             ACTION_PREVIOUS -> handlePrevious()
-            Intent.ACTION_MEDIA_BUTTON -> { /* handled by MediaSession */
-            }
         }
 
         if (Build.VERSION.SDK_INT < 33 ||
@@ -161,15 +166,12 @@ class PlaybackService : MediaSessionService() {
 
         return super.onStartCommand(intent, flags, startId)
     }
+    // ——— Helpers ———
 
-    private fun loadPlaylistIntoPlayer(
-        playlistTracks: List<PlaylistTrack>,
-        startIndex: Int,
-        startPositionMs: Long,
-        autoPlay: Boolean
-    ) {
-        val mediaItems = playlistTracks.map { track ->
+    private fun buildMediaItems(tracks: List<PlaylistTrack>): List<MediaItem> =
+        tracks.map { track ->
             MediaItem.Builder()
+                .setMediaId(track.id.toString()) // Use DB id as stable queue ID
                 .setUri(track.uri)
                 .setMediaMetadata(
                     androidx.media3.common.MediaMetadata.Builder()
@@ -180,10 +182,56 @@ class PlaybackService : MediaSessionService() {
                 )
                 .build()
         }
+
+    private fun loadPlaylistIntoPlayer(
+        playlistTracks: List<PlaylistTrack>,
+        startIndex: Int,
+        startPositionMs: Long,
+        autoPlay: Boolean
+    ) {
+        val mediaItems = buildMediaItems(playlistTracks)
         player.setMediaItems(mediaItems)
         player.seekTo(startIndex, startPositionMs)
         player.prepare()
         if (autoPlay) player.play()
+    }
+
+    private fun syncQueueWith(tracks: List<PlaylistTrack>) {
+        val newItems = buildMediaItems(tracks)
+
+        val wasPlaying = player.isPlaying
+        val oldItems = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+        val oldIndex = player.currentMediaItemIndex
+        val oldId = player.currentMediaItem?.mediaId
+        val oldPos = player.currentPosition
+
+        if (newItems.isEmpty()) {
+            player.setMediaItems(emptyList())
+            player.pause()
+            return
+        }
+
+        player.setMediaItems(newItems, /* resetPosition = */ false)
+        player.prepare()
+
+        val sameItemIndex = oldId?.let { id -> newItems.indexOfFirst { it.mediaId == id } } ?: -1
+        if (sameItemIndex >= 0) {
+            player.seekTo(sameItemIndex, oldPos)
+            if (wasPlaying) player.play()
+            return
+        }
+
+        val oldNextId = oldItems.getOrNull(oldIndex + 1)?.mediaId
+        val nextIndex = oldNextId?.let { nx -> newItems.indexOfFirst { it.mediaId == nx } } ?: -1
+
+        val targetIndex = when {
+            nextIndex >= 0 -> nextIndex
+            oldIndex <= newItems.lastIndex -> oldIndex
+            else -> newItems.lastIndex
+        }
+
+        player.seekTo(targetIndex, 0L)
+        if (wasPlaying) player.play()
     }
 
     private fun handlePrevious() {
@@ -218,8 +266,7 @@ class PlaybackService : MediaSessionService() {
                 .load(artUri)
                 .submit(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL)
                 .get()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) { }
 
         val playIntent = PendingIntent.getService(
             this, 0, Intent(this, PlaybackService::class.java).setAction(ACTION_PLAY),

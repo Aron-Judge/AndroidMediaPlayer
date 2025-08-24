@@ -3,6 +3,7 @@ package com.aron.mediaplayer.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aron.mediaplayer.data.PlaylistDao
+import com.aron.mediaplayer.data.PlaylistEntity
 import com.aron.mediaplayer.data.PlaylistTrack
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -13,26 +14,43 @@ class PlaylistViewModel(
     private val dao: PlaylistDao
 ) : ViewModel() {
 
-    // Live-updating playlist
-    val playlist: StateFlow<List<PlaylistTrack>> =
-        dao.getAll()
+    // All playlists
+    val playlists: StateFlow<List<PlaylistEntity>> =
+        dao.getAllPlaylists()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Tracks for the currently selected playlist
+    fun getTracksForPlaylist(playlistId: Long): StateFlow<List<PlaylistTrack>> =
+        dao.getTracksForPlaylist(playlistId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun addTrack(track: PlaylistTrack) {
         viewModelScope.launch {
-            dao.insert(track)
+            dao.insertTrack(track)
         }
     }
 
     fun removeTrack(track: PlaylistTrack) {
         viewModelScope.launch {
-            dao.delete(track)
+            dao.deleteTrack(track)
         }
     }
 
-    fun clearPlaylist() {
+    fun clearPlaylist(playlistId: Long) {
         viewModelScope.launch {
-            dao.clear()
+            dao.clearPlaylist(playlistId)
+        }
+    }
+
+    fun addPlaylist(playlist: PlaylistEntity) {
+        viewModelScope.launch {
+            dao.insertPlaylist(playlist)
+        }
+    }
+
+    fun deletePlaylist(playlist: PlaylistEntity) {
+        viewModelScope.launch {
+            dao.deletePlaylist(playlist)
         }
     }
 }

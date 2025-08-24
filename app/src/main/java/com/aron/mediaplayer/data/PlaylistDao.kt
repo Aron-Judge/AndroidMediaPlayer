@@ -6,19 +6,32 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface PlaylistDao {
 
-    // Live stream of the entire playlist
-    @Query("SELECT * FROM playlist_tracks")
-    fun getAll(): Flow<List<PlaylistTrack>>
+    // — Playlists —
+    @Insert
+    suspend fun insertPlaylist(playlist: PlaylistEntity): Long
 
-    // Add or replace a single track
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(track: PlaylistTrack)
+    @Query("SELECT * FROM playlists ORDER BY name COLLATE NOCASE ASC")
+    fun getAllPlaylists(): Flow<List<PlaylistEntity>>
 
-    // Remove a single track
+    @Query("SELECT * FROM playlists WHERE playlistId = :id LIMIT 1")
+    suspend fun getPlaylistById(id: Long): PlaylistEntity?
+
+    @Update
+    suspend fun updatePlaylist(playlist: PlaylistEntity)
+
     @Delete
-    suspend fun delete(track: PlaylistTrack)
+    suspend fun deletePlaylist(playlist: PlaylistEntity)
 
-    // Clear the entire playlist
-    @Query("DELETE FROM playlist_tracks")
-    suspend fun clear()
+    // — Tracks in a playlist —
+    @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY id ASC")
+    fun getTracksForPlaylist(playlistId: Long): Flow<List<PlaylistTrack>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrack(track: PlaylistTrack): Long
+
+    @Delete
+    suspend fun deleteTrack(track: PlaylistTrack)
+
+    @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId")
+    suspend fun clearPlaylist(playlistId: Long)
 }

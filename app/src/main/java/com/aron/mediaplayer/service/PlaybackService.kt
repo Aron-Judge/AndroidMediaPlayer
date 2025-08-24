@@ -18,8 +18,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.aron.mediaplayer.R
-import com.aron.mediaplayer.data.AppDatabase
-import com.aron.mediaplayer.data.PlaylistTrack
+import com.aron.mediaplayer.data.*
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.Target
 import kotlinx.coroutines.*
@@ -37,6 +36,8 @@ class PlaybackService : MediaSessionService() {
     // Coroutine scope for DB observation
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var playlistJob: Job? = null
+    private lateinit var dao: PlaylistDao
+    private lateinit var activeStore: ActivePlaylistStore
 
     companion object {
         private const val NOTIFICATION_ID = 1
@@ -100,11 +101,17 @@ class PlaybackService : MediaSessionService() {
 
         createNotificationChannel()
 
-        // Start live playlist sync
-        val dao = AppDatabase.getInstance(applicationContext).playlistDao()
+        dao = AppDatabase.getInstance(applicationContext).playlistDao()
+        activeStore = ActivePlaylistStore(applicationContext, dao)
+
+        // Start live playlist sync (per active playlist)
         playlistJob = serviceScope.launch {
-            dao.getAll().collectLatest { tracks ->
-                syncQueueWith(tracks)
+            val initialId = activeStore.ensureDefaultPlaylistSelected()
+            activeStore.activePlaylistId.collectLatest { pid ->
+                val playlistId = if (pid > 0) pid else initialId
+                dao.getTracksForPlaylist(playlistId).collectLatest { tracks ->
+                    syncQueueWith(tracks)
+                }
             }
         }
     }
@@ -123,11 +130,10 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val dao = AppDatabase.getInstance(applicationContext).playlistDao()
-
-        // Cold start fast-load
+        // Cold start fast-load for active playlist
         if (player.mediaItemCount == 0) {
-            val playlistTracks = runBlocking { dao.getAll().first() }
+            val pid = runBlocking { activeStore.ensureDefaultPlaylistSelected() }
+            val playlistTracks = runBlocking { dao.getTracksForPlaylist(pid).first() }
             if (playlistTracks.isNotEmpty()) {
                 loadPlaylistIntoPlayer(playlistTracks, startIndex = 0, startPositionMs = 0, autoPlay = true)
             }
@@ -135,8 +141,10 @@ class PlaybackService : MediaSessionService() {
 
         if (intent?.action == ACTION_ADD_TO_PLAYLIST) {
             runBlocking {
-                dao.insert(
+                val pid = activeStore.ensureDefaultPlaylistSelected()
+                dao.insertTrack(
                     PlaylistTrack(
+                        playlistId = pid,
                         uri = intent.getStringExtra(EXTRA_URI) ?: return@runBlocking,
                         title = intent.getStringExtra(EXTRA_TITLE) ?: "Unknown Title",
                         artist = intent.getStringExtra(EXTRA_ARTIST) ?: "Unknown Artist",
@@ -152,14 +160,14 @@ class PlaybackService : MediaSessionService() {
                 val uri = intent.getStringExtra(EXTRA_URI)
                 if (uri != null) {
                     _currentUri.value = uri // immediate update for UI
-
-                    val playlistTracks = runBlocking { dao.getAll().first() }
+                    val pid = runBlocking { activeStore.ensureDefaultPlaylistSelected() }
+                    val playlistTracks = runBlocking { dao.getTracksForPlaylist(pid).first() }
                     if (playlistTracks.isNotEmpty()) {
                         val index = playlistTracks.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
                         loadPlaylistIntoPlayer(
                             playlistTracks,
                             startIndex = index,
-                            startPositionMs = 0L,
+                            startPositionMs = 0,
                             autoPlay = true
                         )
                     }
@@ -211,7 +219,6 @@ class PlaybackService : MediaSessionService() {
         player.setMediaItems(mediaItems)
         player.seekTo(startIndex, startPositionMs)
 
-        // Update currentUri immediately
         mediaItems.getOrNull(startIndex)?.localConfiguration?.uri?.toString()?.let {
             _currentUri.value = it
         }

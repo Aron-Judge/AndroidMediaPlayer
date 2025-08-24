@@ -2,7 +2,7 @@
     <!-- Core app theme; Compose provides the colors, this keeps system bars dark -->
     <style name="Theme.MediaPlayer" parent="Theme.AppCompat.DayNight.NoActionBar">
         <!-- Fallback accent (for any View-based UI you might still use) -->
-        <item name="colorPrimary">#1DB954</item>
+        <item name="colorPrimary">#00EEFF</item>
 
         <!-- System bars -->
         <item name="android:statusBarColor">#FF000000</item>

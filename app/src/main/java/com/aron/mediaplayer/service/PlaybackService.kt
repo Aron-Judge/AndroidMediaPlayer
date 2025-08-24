@@ -23,6 +23,8 @@ import com.aron.mediaplayer.data.PlaylistTrack
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.Target
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 
@@ -51,6 +53,10 @@ class PlaybackService : MediaSessionService() {
         const val EXTRA_ARTIST = "artist"
         const val EXTRA_DURATION = "duration"
         const val EXTRA_ARTWORK_URI = "artworkUri"
+
+        // 🌟 Highlight state source of truth
+        private val _currentUri = MutableStateFlow<String?>(null)
+        val currentUri: StateFlow<String?> = _currentUri
     }
 
     private val playerListener = object : Player.Listener {
@@ -59,6 +65,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            _currentUri.value = mediaItem?.localConfiguration?.uri.toString()
             maybeUpdateNotification()
         }
     }
@@ -144,6 +151,8 @@ class PlaybackService : MediaSessionService() {
             ACTION_PLAY -> {
                 val uri = intent.getStringExtra(EXTRA_URI)
                 if (uri != null) {
+                    _currentUri.value = uri // immediate update for UI
+
                     val playlistTracks = runBlocking { dao.getAll().first() }
                     if (playlistTracks.isNotEmpty()) {
                         val index = playlistTracks.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
@@ -180,7 +189,7 @@ class PlaybackService : MediaSessionService() {
     private fun buildMediaItems(tracks: List<PlaylistTrack>): List<MediaItem> =
         tracks.map { track ->
             MediaItem.Builder()
-                .setMediaId(track.id.toString()) // Use DB id as stable queue ID
+                .setMediaId(track.id.toString())
                 .setUri(track.uri)
                 .setMediaMetadata(
                     androidx.media3.common.MediaMetadata.Builder()
@@ -201,6 +210,12 @@ class PlaybackService : MediaSessionService() {
         val mediaItems = buildMediaItems(playlistTracks)
         player.setMediaItems(mediaItems)
         player.seekTo(startIndex, startPositionMs)
+
+        // Update currentUri immediately
+        mediaItems.getOrNull(startIndex)?.localConfiguration?.uri?.toString()?.let {
+            _currentUri.value = it
+        }
+
         player.prepare()
         if (autoPlay) player.play()
     }
@@ -217,6 +232,7 @@ class PlaybackService : MediaSessionService() {
         if (newItems.isEmpty()) {
             player.setMediaItems(emptyList())
             player.pause()
+            _currentUri.value = null
             return
         }
 
@@ -226,6 +242,7 @@ class PlaybackService : MediaSessionService() {
         val sameItemIndex = oldId?.let { id -> newItems.indexOfFirst { it.mediaId == id } } ?: -1
         if (sameItemIndex >= 0) {
             player.seekTo(sameItemIndex, oldPos)
+            _currentUri.value = newItems[sameItemIndex].localConfiguration?.uri.toString()
             if (wasPlaying) player.play()
             return
         }
@@ -240,6 +257,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         player.seekTo(targetIndex, 0L)
+        _currentUri.value = newItems[targetIndex].localConfiguration?.uri.toString()
         if (wasPlaying) player.play()
     }
 

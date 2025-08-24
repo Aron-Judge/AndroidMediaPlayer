@@ -1,4 +1,5 @@
 @file:OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.aron.mediaplayer.ui.songs
 
 import android.Manifest
@@ -11,6 +12,7 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,12 +21,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aron.mediaplayer.data.AppDatabase
 import com.aron.mediaplayer.data.PlaylistTrack
 import com.aron.mediaplayer.service.PlaybackService
+import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,10 +42,15 @@ data class Song(
 )
 
 @Composable
-fun SongsScreen() {
+fun SongsScreen(
+    nowPlayingViewModel: NowPlayingViewModel = viewModel()
+) {
     val context = LocalContext.current
     var songs by remember { mutableStateOf<List<Song>>(emptyList()) }
     var hasPermission by remember { mutableStateOf(false) }
+
+    // Observe current URI from shared ViewModel
+    val currentPlayingUri by nowPlayingViewModel.currentUri.collectAsState()
 
     val mediaPermission =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -93,42 +103,51 @@ fun SongsScreen() {
                 .padding(8.dp)
         ) {
             items(songs) { song ->
-                SongItem(song, context)
+                SongItem(
+                    song = song,
+                    isPlaying = song.contentUri.toString() == currentPlayingUri,
+                    onPlay = {
+                        // Insert into playlist DB
+                        val dao = AppDatabase.getInstance(context).playlistDao()
+                        CoroutineScope(Dispatchers.IO).launch {
+                            dao.insert(
+                                PlaylistTrack(
+                                    uri = song.contentUri.toString(),
+                                    title = song.title,
+                                    artist = song.artist,
+                                    duration = 0L,
+                                    artworkUri = null
+                                )
+                            )
+                        }
+                        // Play in service
+                        val intent = Intent(context, PlaybackService::class.java).apply {
+                            action = PlaybackService.ACTION_PLAY
+                            putExtra(PlaybackService.EXTRA_URI, song.contentUri.toString())
+                        }
+                        ContextCompat.startForegroundService(context, intent)
+                    }
+                )
             }
         }
     }
 }
 
 @Composable
-fun SongItem(song: Song, context: Context) {
+fun SongItem(song: Song, isPlaying: Boolean, onPlay: () -> Unit) {
+    val highlight = Color(0xFF00EEFF)
+    val bgColor = if (isPlaying) highlight.copy(alpha = 0.15f) else Color.Transparent
+    val textColor = if (isPlaying) highlight else MaterialTheme.colorScheme.onBackground
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                // 1️⃣ Insert into playlist DB
-                val dao = AppDatabase.getInstance(context).playlistDao()
-                CoroutineScope(Dispatchers.IO).launch {
-                    dao.insert(
-                        PlaylistTrack(
-                            uri = song.contentUri.toString(),
-                            title = song.title,
-                            artist = song.artist,
-                            duration = 0L, // Optional: query real duration
-                            artworkUri = null
-                        )
-                    )
-                }
-                // 2️⃣ Send ACTION_PLAY intent to service
-                val intent = Intent(context, PlaybackService::class.java).apply {
-                    action = PlaybackService.ACTION_PLAY
-                    putExtra(PlaybackService.EXTRA_URI, song.contentUri.toString())
-                }
-                ContextCompat.startForegroundService(context, intent)
-            }
-            .padding(vertical = 8.dp)
+            .clickable { onPlay() }
+            .background(bgColor)
+            .padding(vertical = 8.dp, horizontal = 8.dp)
     ) {
-        Text(text = song.title, style = MaterialTheme.typography.titleMedium)
-        Text(text = song.artist, style = MaterialTheme.typography.bodyMedium)
+        Text(song.title, style = MaterialTheme.typography.titleMedium, color = textColor)
+        Text(song.artist, style = MaterialTheme.typography.bodyMedium, color = textColor)
     }
 }
 

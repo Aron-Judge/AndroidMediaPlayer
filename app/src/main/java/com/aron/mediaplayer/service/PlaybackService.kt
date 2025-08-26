@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
+import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -33,7 +34,6 @@ class PlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private var mediaSession: MediaSession? = null
 
-    // Coroutine scope for DB observation
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var playlistJob: Job? = null
     private lateinit var dao: PlaylistDao
@@ -55,7 +55,6 @@ class PlaybackService : MediaSessionService() {
         const val EXTRA_DURATION = "duration"
         const val EXTRA_ARTWORK_URI = "artworkUri"
 
-        // 🌟 Highlight state source of truth
         private val _currentUri = MutableStateFlow<String?>(null)
         val currentUri: StateFlow<String?> = _currentUri
     }
@@ -104,7 +103,6 @@ class PlaybackService : MediaSessionService() {
         dao = AppDatabase.getInstance(applicationContext).playlistDao()
         activeStore = ActivePlaylistStore(applicationContext, dao)
 
-        // Start live playlist sync (per active playlist)
         playlistJob = serviceScope.launch {
             val initialId = activeStore.ensureDefaultPlaylistSelected()
             activeStore.activePlaylistId.collectLatest { pid ->
@@ -130,12 +128,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Cold start fast-load for active playlist
         if (player.mediaItemCount == 0) {
             val pid = runBlocking { activeStore.ensureDefaultPlaylistSelected() }
             val playlistTracks = runBlocking { dao.getTracksForPlaylist(pid).first() }
             if (playlistTracks.isNotEmpty()) {
-                loadPlaylistIntoPlayer(playlistTracks, startIndex = 0, startPositionMs = 0, autoPlay = true)
+                loadPlaylistIntoPlayer(playlistTracks, 0, 0, true)
             }
         }
 
@@ -159,17 +156,17 @@ class PlaybackService : MediaSessionService() {
             ACTION_PLAY -> {
                 val uri = intent.getStringExtra(EXTRA_URI)
                 if (uri != null) {
-                    _currentUri.value = uri // immediate update for UI
+                    _currentUri.value = uri
                     val pid = runBlocking { activeStore.ensureDefaultPlaylistSelected() }
                     val playlistTracks = runBlocking { dao.getTracksForPlaylist(pid).first() }
-                    if (playlistTracks.isNotEmpty()) {
-                        val index = playlistTracks.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
-                        loadPlaylistIntoPlayer(
-                            playlistTracks,
-                            startIndex = index,
-                            startPositionMs = 0,
-                            autoPlay = true
-                        )
+                    val indexInPlaylist = playlistTracks.indexOfFirst { it.uri == uri }
+                    if (indexInPlaylist >= 0) {
+                        loadPlaylistIntoPlayer(playlistTracks, indexInPlaylist, 0, true)
+                    } else {
+                        // Fetch directly from MediaStore for ad-hoc play
+                        getSongFromMediaStore(uri)?.let {
+                            loadPlaylistIntoPlayer(listOf(it), 0, 0, true)
+                        }
                     }
                 } else {
                     player.play()
@@ -192,7 +189,30 @@ class PlaybackService : MediaSessionService() {
         return super.onStartCommand(intent, flags, startId)
     }
 
-    // ——— Helpers ———
+    private fun getSongFromMediaStore(uri: String): PlaylistTrack? {
+        val projection = arrayOf(
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.DURATION
+        )
+        val contentUri = Uri.parse(uri)
+        contentResolver.query(contentUri, projection, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val title = cursor.getString(0) ?: "Unknown Title"
+                val artist = cursor.getString(1) ?: "Unknown Artist"
+                val duration = cursor.getLong(2)
+                return PlaylistTrack(
+                    playlistId = -1,
+                    uri = uri,
+                    title = title,
+                    artist = artist,
+                    duration = duration,
+                    artworkUri = null
+                )
+            }
+        }
+        return null
+    }
 
     private fun buildMediaItems(tracks: List<PlaylistTrack>): List<MediaItem> =
         tracks.map { track ->
@@ -218,18 +238,15 @@ class PlaybackService : MediaSessionService() {
         val mediaItems = buildMediaItems(playlistTracks)
         player.setMediaItems(mediaItems)
         player.seekTo(startIndex, startPositionMs)
-
         mediaItems.getOrNull(startIndex)?.localConfiguration?.uri?.toString()?.let {
             _currentUri.value = it
         }
-
         player.prepare()
         if (autoPlay) player.play()
     }
 
     private fun syncQueueWith(tracks: List<PlaylistTrack>) {
         val newItems = buildMediaItems(tracks)
-
         val wasPlaying = player.isPlaying
         val oldItems = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
         val oldIndex = player.currentMediaItemIndex
@@ -243,7 +260,7 @@ class PlaybackService : MediaSessionService() {
             return
         }
 
-        player.setMediaItems(newItems, /* resetPosition = */ false)
+        player.setMediaItems(newItems, false)
         player.prepare()
 
         val sameItemIndex = oldId?.let { id -> newItems.indexOfFirst { it.mediaId == id } } ?: -1
@@ -283,7 +300,6 @@ class PlaybackService : MediaSessionService() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-    // Simple in-memory cache for artwork bitmaps
     private val artworkCache = mutableMapOf<Uri, Bitmap?>()
 
     private fun buildNotification(): Notification {
@@ -292,7 +308,6 @@ class PlaybackService : MediaSessionService() {
 
         val title = mm?.title?.toString()?.takeIf { it.isNotEmpty() } ?: "Sample Track"
         val artist = mm?.artist?.toString()?.takeIf { it.isNotEmpty() } ?: "Unknown Artist"
-
         val artUri: Uri = mm?.artworkUri
             ?: Uri.parse("https://via.placeholder.com/300.png?text=No+Artwork")
 
@@ -302,38 +317,50 @@ class PlaybackService : MediaSessionService() {
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .addAction(android.R.drawable.ic_media_previous, "Previous",
-                PendingIntent.getService(this, 0,
+            .addAction(
+                android.R.drawable.ic_media_previous, "Previous",
+                PendingIntent.getService(
+                    this, 0,
                     Intent(this, PlaybackService::class.java).setAction(ACTION_PREVIOUS),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            )
             .addAction(
                 if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
                 if (player.isPlaying) "Pause" else "Play",
                 if (player.isPlaying)
-                    PendingIntent.getService(this, 0,
+                    PendingIntent.getService(
+                        this, 0,
                         Intent(this, PlaybackService::class.java).setAction(ACTION_PAUSE),
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
                 else
-                    PendingIntent.getService(this, 0,
+                    PendingIntent.getService(
+                        this, 0,
                         Intent(this, PlaybackService::class.java).setAction(ACTION_PLAY),
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
             )
-            .addAction(android.R.drawable.ic_media_next, "Next",
-                PendingIntent.getService(this, 0,
+            .addAction(
+                android.R.drawable.ic_media_next, "Next",
+                PendingIntent.getService(
+                    this, 0,
                     Intent(this, PlaybackService::class.java).setAction(ACTION_NEXT),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            )
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(mediaSession?.sessionCompatToken)
                     .setShowActionsInCompactView(0, 1, 2)
             )
 
-        // If cached, use immediately
+        // Use cached artwork immediately if present
         artworkCache[artUri]?.let { cachedBmp ->
             return builder.setLargeIcon(cachedBmp).build()
         }
 
-        // Otherwise load asynchronously
+        // Load artwork in background if not cached
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val bmp = Glide.with(this@PlaybackService)
@@ -341,7 +368,6 @@ class PlaybackService : MediaSessionService() {
                     .load(artUri)
                     .submit(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL)
                     .get()
-                // Cache result for reuse
                 artworkCache[artUri] = bmp
                 withContext(Dispatchers.Main) {
                     val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -356,7 +382,6 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
-        // Return the text-only notification immediately
         return builder.build()
     }
 

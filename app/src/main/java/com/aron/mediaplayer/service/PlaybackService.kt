@@ -1,3 +1,4 @@
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
 package com.aron.mediaplayer.service
 
 import android.Manifest
@@ -13,7 +14,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -27,17 +27,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 
-@UnstableApi
 class PlaybackService : MediaSessionService() {
 
     private lateinit var player: ExoPlayer
     private var mediaSession: MediaSession? = null
 
-    // Coroutine scope for DB observation
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var playlistJob: Job? = null
     private lateinit var dao: PlaylistDao
     private lateinit var activeStore: ActivePlaylistStore
+
+    // ⭐ Added playback mode to distinguish flows
+    private enum class PlaybackMode { PLAYLIST, SINGLE }
+    private var playbackMode: PlaybackMode = PlaybackMode.PLAYLIST
 
     companion object {
         private const val NOTIFICATION_ID = 1
@@ -55,7 +57,6 @@ class PlaybackService : MediaSessionService() {
         const val EXTRA_DURATION = "duration"
         const val EXTRA_ARTWORK_URI = "artworkUri"
 
-        // 🌟 Highlight state source of truth
         private val _currentUri = MutableStateFlow<String?>(null)
         val currentUri: StateFlow<String?> = _currentUri
     }
@@ -104,13 +105,15 @@ class PlaybackService : MediaSessionService() {
         dao = AppDatabase.getInstance(applicationContext).playlistDao()
         activeStore = ActivePlaylistStore(applicationContext, dao)
 
-        // Start live playlist sync (per active playlist)
+        // ⭐ Only sync queue with playlist in PLAYLIST mode
         playlistJob = serviceScope.launch {
             val initialId = activeStore.ensureDefaultPlaylistSelected()
             activeStore.activePlaylistId.collectLatest { pid ->
                 val playlistId = if (pid > 0) pid else initialId
                 dao.getTracksForPlaylist(playlistId).collectLatest { tracks ->
-                    syncQueueWith(tracks)
+                    if (playbackMode == PlaybackMode.PLAYLIST) {
+                        syncQueueWith(tracks)
+                    }
                 }
             }
         }
@@ -130,8 +133,13 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Cold start fast-load for active playlist
-        if (player.mediaItemCount == 0) {
+        val action = intent?.action
+
+        // ⭐ Cold start only loads playlist if in playlist mode and no explicit single URI
+        if (player.mediaItemCount == 0 &&
+            playbackMode == PlaybackMode.PLAYLIST &&
+            intent?.getStringExtra(EXTRA_URI) == null
+        ) {
             val pid = runBlocking { activeStore.ensureDefaultPlaylistSelected() }
             val playlistTracks = runBlocking { dao.getTracksForPlaylist(pid).first() }
             if (playlistTracks.isNotEmpty()) {
@@ -139,7 +147,7 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
-        if (intent?.action == ACTION_ADD_TO_PLAYLIST) {
+        if (action == ACTION_ADD_TO_PLAYLIST) {
             runBlocking {
                 val pid = activeStore.ensureDefaultPlaylistSelected()
                 dao.insertTrack(
@@ -155,23 +163,19 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
-        when (intent?.action) {
+        when (action) {
             ACTION_PLAY -> {
                 val uri = intent.getStringExtra(EXTRA_URI)
                 if (uri != null) {
-                    _currentUri.value = uri // immediate update for UI
-                    val pid = runBlocking { activeStore.ensureDefaultPlaylistSelected() }
-                    val playlistTracks = runBlocking { dao.getTracksForPlaylist(pid).first() }
-                    if (playlistTracks.isNotEmpty()) {
-                        val index = playlistTracks.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
-                        loadPlaylistIntoPlayer(
-                            playlistTracks,
-                            startIndex = index,
-                            startPositionMs = 0,
-                            autoPlay = true
-                        )
-                    }
+                    // ⭐ Single-song playback path
+                    playbackMode = PlaybackMode.SINGLE
+                    _currentUri.value = uri
+                    player.setMediaItem(MediaItem.fromUri(uri))
+                    player.prepare()
+                    player.play()
                 } else {
+                    // Playlist mode path
+                    playbackMode = PlaybackMode.PLAYLIST
                     player.play()
                 }
             }
@@ -191,8 +195,6 @@ class PlaybackService : MediaSessionService() {
 
         return super.onStartCommand(intent, flags, startId)
     }
-
-    // ——— Helpers ———
 
     private fun buildMediaItems(tracks: List<PlaylistTrack>): List<MediaItem> =
         tracks.map { track ->

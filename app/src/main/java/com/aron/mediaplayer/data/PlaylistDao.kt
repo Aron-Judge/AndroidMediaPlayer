@@ -3,12 +3,12 @@ package com.aron.mediaplayer.data
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
-// New projection
 data class PlaylistWithCount(
     val playlistId: Long,
     val name: String,
     val trackCount: Int
 )
+
 @Dao
 interface PlaylistDao {
 
@@ -28,6 +28,14 @@ interface PlaylistDao {
     @Delete
     suspend fun deletePlaylist(playlist: PlaylistEntity)
 
+    // NEW: update only description
+    @Query("UPDATE playlists SET description = :description WHERE playlistId = :playlistId")
+    suspend fun updatePlaylistDescription(playlistId: Long, description: String?)
+
+    // NEW: update only cover image
+    @Query("UPDATE playlists SET coverUri = :coverUri WHERE playlistId = :playlistId")
+    suspend fun updatePlaylistCover(playlistId: Long, coverUri: String?)
+
     // — Tracks in a playlist —
     @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY id ASC")
     fun getTracksForPlaylist(playlistId: Long): Flow<List<PlaylistTrack>>
@@ -41,6 +49,7 @@ interface PlaylistDao {
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId")
     suspend fun clearPlaylist(playlistId: Long)
 
+    // — Playlists with track counts —
     @Query("""
         SELECT p.playlistId, p.name, COUNT(t.id) AS trackCount
         FROM playlists p

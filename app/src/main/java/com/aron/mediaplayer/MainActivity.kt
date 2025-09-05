@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -20,13 +21,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.util.UnstableApi
+import com.aron.mediaplayer.data.ActivePlaylistStore
 import com.aron.mediaplayer.data.AppDatabase
+import com.aron.mediaplayer.data.PlaylistEntity
 import com.aron.mediaplayer.ui.screens.PlaylistDetailScreen
 import com.aron.mediaplayer.ui.screens.PlaylistListScreen
 import com.aron.mediaplayer.ui.songs.SongsScreen
 import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import com.aron.mediaplayer.viewmodel.PlaylistViewModel
 import com.aron.mediaplayer.viewmodel.SongsViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 sealed class Screen {
     object Songs : Screen()
@@ -48,10 +54,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 fun MediaPlayerApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val db = remember { AppDatabase.getInstance(context) }
+    val activeStore = remember { ActivePlaylistStore(context, db.playlistDao()) }
 
     val playlistViewModel: PlaylistViewModel = viewModel(
         factory = object : ViewModelProvider.Factory {
@@ -88,22 +96,25 @@ fun MediaPlayerApp() {
     val playlistsWithCount by playlistViewModel.playlistsWithCount.collectAsState()
 
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Songs) }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         bottomBar = {
-            NavigationBar(containerColor = Color.Black, contentColor = Color.White) {
-                NavigationBarItem(
-                    selected = currentScreen is Screen.Songs,
-                    onClick = { currentScreen = Screen.Songs },
-                    label = { Text("Songs") },
-                    icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Songs") }
-                )
-                NavigationBarItem(
-                    selected = currentScreen is Screen.Playlists,
-                    onClick = { currentScreen = Screen.Playlists },
-                    label = { Text("Playlists") },
-                    icon = { Icon(Icons.Filled.PlaylistPlay, contentDescription = "Playlists") }
-                )
+            if (currentScreen is Screen.Songs || currentScreen is Screen.Playlists) {
+                NavigationBar(containerColor = Color.Black, contentColor = Color.White) {
+                    NavigationBarItem(
+                        selected = currentScreen is Screen.Songs,
+                        onClick = { currentScreen = Screen.Songs },
+                        label = { Text("Songs") },
+                        icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Songs") }
+                    )
+                    NavigationBarItem(
+                        selected = currentScreen is Screen.Playlists,
+                        onClick = { currentScreen = Screen.Playlists },
+                        label = { Text("Playlists") },
+                        icon = { Icon(Icons.Filled.PlaylistPlay, contentDescription = "Playlists") }
+                    )
+                }
             }
         },
         containerColor = Color.Black,
@@ -119,7 +130,22 @@ fun MediaPlayerApp() {
                 )
                 Screen.Playlists -> PlaylistListScreen(
                     playlists = playlistsWithCount,
-                    onPlaylistClick = { id -> currentScreen = Screen.PlaylistDetail(id) }
+                    onPlaylistClick = { id -> currentScreen = Screen.PlaylistDetail(id) },
+                    onCreatePlaylist = { name, desc, cover ->
+                        scope.launch(Dispatchers.IO) {
+                            val newId = db.playlistDao().insertPlaylist(
+                                PlaylistEntity(
+                                    name = name,
+                                    description = desc,
+                                    coverUri = cover
+                                )
+                            )
+                            activeStore.setActivePlaylistId(newId) // set as active
+                            launch(Dispatchers.Main) {
+                                currentScreen = Screen.PlaylistDetail(newId)
+                            }
+                        }
+                    }
                 )
                 is Screen.PlaylistDetail -> PlaylistDetailScreen(
                     playlistId = screen.id,

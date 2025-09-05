@@ -25,6 +25,7 @@ import androidx.media3.common.util.UnstableApi
 import com.aron.mediaplayer.data.ActivePlaylistStore
 import com.aron.mediaplayer.data.AppDatabase
 import com.aron.mediaplayer.data.PlaylistEntity
+import com.aron.mediaplayer.ui.components.MissingCoversDialog
 import com.aron.mediaplayer.ui.screens.PlaylistDetailScreen
 import com.aron.mediaplayer.ui.screens.PlaylistListScreen
 import com.aron.mediaplayer.ui.songs.SongsScreen
@@ -95,6 +96,11 @@ fun MediaPlayerApp() {
     val songs by songsViewModel.songs.collectAsState()
     val playlistsWithCount by playlistViewModel.playlistsWithCount.collectAsState()
 
+    // NEW: Smarter detection for missing or broken covers
+    val playlistsMissingCover by playlistViewModel
+        .getPlaylistsNeedingCover(context)
+        .collectAsState(initial = emptyList())
+
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Songs) }
     val scope = rememberCoroutineScope()
 
@@ -140,7 +146,7 @@ fun MediaPlayerApp() {
                                     coverUri = cover
                                 )
                             )
-                            activeStore.setActivePlaylistId(newId) // set as active
+                            activeStore.setActivePlaylistId(newId)
                             launch(Dispatchers.Main) {
                                 currentScreen = Screen.PlaylistDetail(newId)
                             }
@@ -152,6 +158,18 @@ fun MediaPlayerApp() {
                     viewModel = playlistViewModel,
                     currentPlayingUri = currentPlayingUri,
                     onBack = { currentScreen = Screen.Playlists }
+                )
+            }
+
+            // Recovery prompt for missing/broken covers
+            if (playlistsMissingCover.isNotEmpty()) {
+                MissingCoversDialog(
+                    playlists = playlistsMissingCover,
+                    onCoverSelected = { playlistId, uri ->
+                        scope.launch(Dispatchers.IO) {
+                            db.playlistDao().updatePlaylistCover(playlistId, uri.toString())
+                        }
+                    }
                 )
             }
         }

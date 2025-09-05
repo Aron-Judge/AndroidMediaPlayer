@@ -1,5 +1,6 @@
 package com.aron.mediaplayer.ui.components
 
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -20,15 +22,22 @@ fun CreatePlaylistDialog(
     onCreate: (String, String?, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var name by remember { mutableStateOf(TextFieldValue("")) }
     var description by remember { mutableStateOf(TextFieldValue("")) }
     var coverUri by remember { mutableStateOf<String?>(null) }
 
-    // Image picker launcher
+    // Use OpenDocument so we can persist URI permission
     val imagePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        coverUri = uri?.toString()
+        uri?.let {
+            context.contentResolver.takePersistableUriPermission(
+                it,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+            coverUri = it.toString()
+        }
     }
 
     AlertDialog(
@@ -73,7 +82,7 @@ fun CreatePlaylistDialog(
                 }
 
                 Button(
-                    onClick = { imagePickerLauncher.launch("image/*") },
+                    onClick = { imagePickerLauncher.launch(arrayOf("image/*")) },
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 ) {
                     Text("Choose Cover Image")

@@ -58,4 +58,10 @@ interface PlaylistDao {
         ORDER BY p.name COLLATE NOCASE ASC
     """)
     fun getPlaylistsWithCount(): Flow<List<PlaylistWithCount>>
+
+    @Query("SELECT * FROM playlists WHERE coverUri IS NULL OR coverUri = ''")
+    fun getPlaylistsMissingCover(): kotlinx.coroutines.flow.Flow<List<PlaylistEntity>>
+
+    @Query("SELECT * FROM playlists")
+    fun getAllPlaylistsFlow(): Flow<List<PlaylistEntity>>
 }

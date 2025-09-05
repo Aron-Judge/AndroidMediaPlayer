@@ -21,11 +21,18 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aron.mediaplayer.data.AppDatabase
-import com.aron.mediaplayer.ui.screens.PlaylistsScreen
+import com.aron.mediaplayer.ui.screens.PlaylistDetailScreen
+import com.aron.mediaplayer.ui.screens.PlaylistListScreen
 import com.aron.mediaplayer.ui.songs.SongsScreen
 import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import com.aron.mediaplayer.viewmodel.PlaylistViewModel
 import com.aron.mediaplayer.viewmodel.SongsViewModel
+
+sealed class Screen {
+    object Songs : Screen()
+    object Playlists : Screen()
+    data class PlaylistDetail(val id: Long) : Screen()
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,7 +73,6 @@ fun MediaPlayerApp() {
         if (granted) songsViewModel.loadSongs(context)
     }
 
-    // Function to trigger permission based on Android version
     val requestPermission: () -> Unit = {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissionLauncher.launch(Manifest.permission.READ_MEDIA_AUDIO)
@@ -75,46 +81,51 @@ fun MediaPlayerApp() {
         }
     }
 
-    // Request on first launch
     LaunchedEffect(Unit) { requestPermission() }
 
     val currentPlayingUri by nowPlayingViewModel.currentUri.collectAsState()
     val songs by songsViewModel.songs.collectAsState()
+    val playlistsWithCount by playlistViewModel.playlistsWithCount.collectAsState()
 
-    val selectedTab = remember { mutableStateOf(0) }
-    val tabs = listOf("Songs", "Playlists")
-    val icons = listOf(Icons.Filled.LibraryMusic, Icons.Filled.PlaylistPlay)
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Songs) }
 
     Scaffold(
         bottomBar = {
             NavigationBar(containerColor = Color.Black, contentColor = Color.White) {
-                tabs.forEachIndexed { index, title ->
-                    NavigationBarItem(
-                        selected = selectedTab.value == index,
-                        onClick = { selectedTab.value = index },
-                        label = { Text(title) },
-                        icon = { Icon(icons[index], contentDescription = title) }
-                    )
-                }
+                NavigationBarItem(
+                    selected = currentScreen is Screen.Songs,
+                    onClick = { currentScreen = Screen.Songs },
+                    label = { Text("Songs") },
+                    icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Songs") }
+                )
+                NavigationBarItem(
+                    selected = currentScreen is Screen.Playlists,
+                    onClick = { currentScreen = Screen.Playlists },
+                    label = { Text("Playlists") },
+                    icon = { Icon(Icons.Filled.PlaylistPlay, contentDescription = "Playlists") }
+                )
             }
         },
         containerColor = Color.Black,
         contentColor = Color.White
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
-            when (selectedTab.value) {
-                0 -> SongsScreen(
+            when (val screen = currentScreen) {
+                Screen.Songs -> SongsScreen(
                     hasPermission = hasPermission,
                     songs = songs,
                     currentPlayingUri = currentPlayingUri,
                     onRequestPermission = requestPermission
                 )
-                1 -> PlaylistsScreen(
+                Screen.Playlists -> PlaylistListScreen(
+                    playlists = playlistsWithCount,
+                    onPlaylistClick = { id -> currentScreen = Screen.PlaylistDetail(id) }
+                )
+                is Screen.PlaylistDetail -> PlaylistDetailScreen(
+                    playlistId = screen.id,
                     viewModel = playlistViewModel,
                     currentPlayingUri = currentPlayingUri,
-                    hasPermission = hasPermission,
-                    songs = songs,
-                    onRequestPermission = requestPermission
+                    onBack = { currentScreen = Screen.Playlists }
                 )
             }
         }

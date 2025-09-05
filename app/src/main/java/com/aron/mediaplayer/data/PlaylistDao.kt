@@ -3,6 +3,12 @@ package com.aron.mediaplayer.data
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
+// New projection
+data class PlaylistWithCount(
+    val playlistId: Long,
+    val name: String,
+    val trackCount: Int
+)
 @Dao
 interface PlaylistDao {
 
@@ -34,4 +40,13 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId")
     suspend fun clearPlaylist(playlistId: Long)
+
+    @Query("""
+        SELECT p.playlistId, p.name, COUNT(t.id) AS trackCount
+        FROM playlists p
+        LEFT JOIN playlist_tracks t ON p.playlistId = t.playlistId
+        GROUP BY p.playlistId
+        ORDER BY p.name COLLATE NOCASE ASC
+    """)
+    fun getPlaylistsWithCount(): Flow<List<PlaylistWithCount>>
 }

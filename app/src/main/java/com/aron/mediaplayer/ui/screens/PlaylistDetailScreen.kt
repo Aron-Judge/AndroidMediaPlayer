@@ -1,15 +1,23 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.ExperimentalFoundationApi::class // ✅ add this
+)
 
 package com.aron.mediaplayer.ui.screens
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -49,7 +57,6 @@ fun PlaylistDetailScreen(
         value = dao.getPlaylistById(playlistId)
     }
 
-    // ✅ Live search results
     val tracks by viewModel.getTracksForPlaylistLive(playlistId).collectAsState()
     val searchText by viewModel.getSearchQuery().collectAsState()
 
@@ -175,7 +182,7 @@ fun PlaylistDetailScreen(
 
                     Spacer(Modifier.height(12.dp))
 
-                    // ✅ Search bar
+                    // Search bar
                     OutlinedTextField(
                         value = searchText,
                         onValueChange = { viewModel.setSearchQuery(it) },
@@ -187,25 +194,70 @@ fun PlaylistDetailScreen(
                 }
             }
 
-            // Track list
-            items(tracks) { track ->
-                PlaylistTrackItem(
-                    track = track,
-                    isPlaying = track.uri == currentPlayingUri,
-                    onPlay = {
-                        val intent = Intent(context, PlaybackService::class.java).apply {
-                            action = PlaybackService.ACTION_PLAY
-                            putExtra(PlaybackService.EXTRA_URI, track.uri)
+            // Animated empty state
+            item {
+                AnimatedVisibility(
+                    visible = tracks.isEmpty(),
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = if (searchText.isBlank()) Icons.Default.MusicNote else Icons.Default.Search,
+                                contentDescription = null,
+                                tint = Color.Gray,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            val message = if (searchText.isBlank()) {
+                                "This playlist is empty"
+                            } else {
+                                "No results found for \"$searchText\""
+                            }
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.Gray
+                            )
                         }
-                        ContextCompat.startForegroundService(context, intent)
-                    },
-                    onDelete = { viewModel.removeTrack(track) },
-                    onAddToOtherPlaylist = {
-                        targetSong = track
-                        showPicker = true
-                    },
-                    searchQuery = searchText // ✅ Pass search text for highlighting
-                )
+                    }
+                }
+            }
+
+            // Animated track list
+            if (tracks.isNotEmpty()) {
+                itemsIndexed(tracks, key = { _, track -> track.id }) { _, track ->
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn(),
+                        exit = fadeOut()
+                    ) {
+                        PlaylistTrackItem(
+                            track = track,
+                            isPlaying = track.uri == currentPlayingUri,
+                            onPlay = {
+                                val intent = Intent(context, PlaybackService::class.java).apply {
+                                    action = PlaybackService.ACTION_PLAY
+                                    putExtra(PlaybackService.EXTRA_URI, track.uri)
+                                }
+                                ContextCompat.startForegroundService(context, intent)
+                            },
+                            onDelete = { viewModel.removeTrack(track) },
+                            onAddToOtherPlaylist = {
+                                targetSong = track
+                                showPicker = true
+                            },
+                            searchQuery = searchText,
+                            modifier = Modifier.animateItemPlacement() // smooth position changes
+                        )
+                    }
+                }
             }
         }
     }

@@ -26,14 +26,15 @@ fun PlaylistTrackItem(
     onPlay: () -> Unit,
     onDelete: () -> Unit,
     onAddToOtherPlaylist: () -> Unit,
-    searchQuery: String = "" // ✅ New: pass current search text for highlighting
+    searchQuery: String = "",
+    modifier: Modifier = Modifier // ✅ added
 ) {
     val highlight = Color(0xFF1DB954)
     val bgColor = if (isPlaying) highlight.copy(alpha = 0.15f) else Color.Transparent
     val textColor = if (isPlaying) highlight else MaterialTheme.colorScheme.onBackground
 
     Row(
-        modifier = Modifier
+        modifier = modifier // ✅ apply passed modifier here
             .fillMaxWidth()
             .background(bgColor)
             .padding(vertical = 8.dp)
@@ -66,9 +67,6 @@ fun PlaylistTrackItem(
     }
 }
 
-/**
- * Highlights the part of [text] that matches [query] (case-insensitive).
- */
 private fun highlightMatch(text: String, query: String, normalColor: Color): AnnotatedString {
     if (query.isBlank()) return AnnotatedString(text)
 

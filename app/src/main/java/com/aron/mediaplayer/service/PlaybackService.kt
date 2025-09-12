@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -38,6 +39,7 @@ class PlaybackService : MediaSessionService() {
     private var playlistJob: Job? = null
     private lateinit var dao: PlaylistDao
     private lateinit var activeStore: ActivePlaylistStore
+    private lateinit var prefs: SharedPreferences
 
     companion object {
         private const val NOTIFICATION_ID = 1
@@ -54,6 +56,13 @@ class PlaybackService : MediaSessionService() {
         const val EXTRA_ARTIST = "artist"
         const val EXTRA_DURATION = "duration"
         const val EXTRA_ARTWORK_URI = "artworkUri"
+        const val EXTRA_PLAYLIST_ID = "playlistId"
+
+        private const val PREFS_NAME = "playback_state"
+        private const val KEY_PLAYLIST_ID = "playlist_id"
+        private const val KEY_TRACK_INDEX = "track_index"
+        private const val KEY_TRACK_POSITION = "track_position"
+        private const val KEY_WAS_PLAYING = "was_playing"
 
         private val _currentUri = MutableStateFlow<String?>(null)
         val currentUri: StateFlow<String?> = _currentUri
@@ -62,11 +71,20 @@ class PlaybackService : MediaSessionService() {
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             maybeUpdateNotification()
+            savePlaybackState()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             _currentUri.value = mediaItem?.localConfiguration?.uri.toString()
             maybeUpdateNotification()
+            savePlaybackState()
+        }
+
+        override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_ENDED && player.hasNextMediaItem()) {
+                player.seekToNextMediaItem()
+                player.play()
+            }
         }
     }
 
@@ -84,8 +102,11 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+
         player = ExoPlayer.Builder(this).build().apply {
             addListener(playerListener)
+            repeatMode = Player.REPEAT_MODE_ALL
         }
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(
@@ -112,9 +133,12 @@ class PlaybackService : MediaSessionService() {
                 }
             }
         }
+
+        restorePlaybackState()
     }
 
     override fun onDestroy() {
+        savePlaybackState()
         playlistJob?.cancel()
         serviceScope.cancel()
         player.removeListener(playerListener)
@@ -127,15 +151,33 @@ class PlaybackService : MediaSessionService() {
         return mediaSession
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (player.mediaItemCount == 0) {
-            val pid = runBlocking { activeStore.ensureDefaultPlaylistSelected() }
-            val playlistTracks = runBlocking { dao.getTracksForPlaylist(pid).first() }
-            if (playlistTracks.isNotEmpty()) {
-                loadPlaylistIntoPlayer(playlistTracks, 0, 0, true)
+    private fun savePlaybackState() {
+        val pid = runBlocking { activeStore.activePlaylistId.first() }
+        prefs.edit()
+            .putLong(KEY_PLAYLIST_ID, pid)
+            .putInt(KEY_TRACK_INDEX, player.currentMediaItemIndex)
+            .putLong(KEY_TRACK_POSITION, player.currentPosition)
+            .putBoolean(KEY_WAS_PLAYING, player.isPlaying)
+            .apply()
+    }
+
+    private fun restorePlaybackState() {
+        val pid = prefs.getLong(KEY_PLAYLIST_ID, -1L)
+        val index = prefs.getInt(KEY_TRACK_INDEX, 0)
+        val pos = prefs.getLong(KEY_TRACK_POSITION, 0L)
+        val wasPlaying = prefs.getBoolean(KEY_WAS_PLAYING, false)
+
+        if (pid > 0) {
+            serviceScope.launch {
+                val tracks = dao.getTracksForPlaylist(pid).first()
+                if (tracks.isNotEmpty()) {
+                    loadPlaylistIntoPlayer(tracks, index.coerceIn(tracks.indices), pos, wasPlaying)
+                }
             }
         }
+    }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_ADD_TO_PLAYLIST) {
             runBlocking {
                 val pid = activeStore.ensureDefaultPlaylistSelected()
@@ -155,15 +197,21 @@ class PlaybackService : MediaSessionService() {
         when (intent?.action) {
             ACTION_PLAY -> {
                 val uri = intent.getStringExtra(EXTRA_URI)
+                val pidFromIntent = intent.getLongExtra(EXTRA_PLAYLIST_ID, -1L)
+
                 if (uri != null) {
-                    _currentUri.value = uri
-                    val pid = runBlocking { activeStore.ensureDefaultPlaylistSelected() }
+                    val pid = if (pidFromIntent > 0) pidFromIntent
+                    else runBlocking { activeStore.ensureDefaultPlaylistSelected() }
+
                     val playlistTracks = runBlocking { dao.getTracksForPlaylist(pid).first() }
                     val indexInPlaylist = playlistTracks.indexOfFirst { it.uri == uri }
+
                     if (indexInPlaylist >= 0) {
+                        serviceScope.launch {
+                            activeStore.setActivePlaylistId(pid) // ✅ now in coroutine
+                        }
                         loadPlaylistIntoPlayer(playlistTracks, indexInPlaylist, 0, true)
                     } else {
-                        // Fetch directly from MediaStore for ad-hoc play
                         getSongFromMediaStore(uri)?.let {
                             loadPlaylistIntoPlayer(listOf(it), 0, 0, true)
                         }

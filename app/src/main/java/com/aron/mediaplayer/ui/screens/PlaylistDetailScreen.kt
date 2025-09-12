@@ -1,6 +1,6 @@
 @file:OptIn(
     androidx.compose.material3.ExperimentalMaterial3Api::class,
-    androidx.compose.foundation.ExperimentalFoundationApi::class // ✅ add this
+    androidx.compose.foundation.ExperimentalFoundationApi::class
 )
 
 package com.aron.mediaplayer.ui.screens
@@ -12,7 +12,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -194,7 +193,7 @@ fun PlaylistDetailScreen(
                 }
             }
 
-            // Animated empty state
+            // Empty state
             item {
                 AnimatedVisibility(
                     visible = tracks.isEmpty(),
@@ -230,7 +229,7 @@ fun PlaylistDetailScreen(
                 }
             }
 
-            // Animated track list
+            // Track list
             if (tracks.isNotEmpty()) {
                 itemsIndexed(tracks, key = { _, track -> track.id }) { _, track ->
                     AnimatedVisibility(
@@ -245,6 +244,7 @@ fun PlaylistDetailScreen(
                                 val intent = Intent(context, PlaybackService::class.java).apply {
                                     action = PlaybackService.ACTION_PLAY
                                     putExtra(PlaybackService.EXTRA_URI, track.uri)
+                                    putExtra(PlaybackService.EXTRA_PLAYLIST_ID, playlistId) // ✅ added
                                 }
                                 ContextCompat.startForegroundService(context, intent)
                             },
@@ -254,7 +254,7 @@ fun PlaylistDetailScreen(
                                 showPicker = true
                             },
                             searchQuery = searchText,
-                            modifier = Modifier.animateItemPlacement() // smooth position changes
+                            modifier = Modifier.animateItemPlacement()
                         )
                     }
                 }

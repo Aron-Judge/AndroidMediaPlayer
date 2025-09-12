@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -47,7 +48,11 @@ fun PlaylistDetailScreen(
     val playlist by produceState<PlaylistEntity?>(initialValue = null, playlistId) {
         value = dao.getPlaylistById(playlistId)
     }
-    val tracks by viewModel.getTracksForPlaylist(playlistId).collectAsState()
+
+    // ✅ Live search results
+    val tracks by viewModel.getTracksForPlaylistLive(playlistId).collectAsState()
+    val searchText by viewModel.getSearchQuery().collectAsState()
+
     val playlists by dao.getAllPlaylists().collectAsState(initial = emptyList())
 
     var showPicker by remember { mutableStateOf(false) }
@@ -167,6 +172,18 @@ fun PlaylistDetailScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.Gray
                     )
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // ✅ Search bar
+                    OutlinedTextField(
+                        value = searchText,
+                        onValueChange = { viewModel.setSearchQuery(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Search by song or artist") },
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                    )
                 }
             }
 
@@ -186,7 +203,8 @@ fun PlaylistDetailScreen(
                     onAddToOtherPlaylist = {
                         targetSong = track
                         showPicker = true
-                    }
+                    },
+                    searchQuery = searchText // ✅ Pass search text for highlighting
                 )
             }
         }

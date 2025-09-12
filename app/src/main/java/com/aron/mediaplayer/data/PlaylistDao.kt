@@ -40,6 +40,18 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY id ASC")
     fun getTracksForPlaylist(playlistId: Long): Flow<List<PlaylistTrack>>
 
+    // ✅ NEW: Search tracks in playlist by title OR artist (case-insensitive, partial match)
+    @Query("""
+        SELECT * FROM playlist_tracks
+        WHERE playlistId = :playlistId
+          AND (
+              LOWER(title) LIKE LOWER('%' || :query || '%')
+              OR LOWER(artist) LIKE LOWER('%' || :query || '%')
+          )
+        ORDER BY id ASC
+    """)
+    fun searchTracksInPlaylist(playlistId: Long, query: String): Flow<List<PlaylistTrack>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTrack(track: PlaylistTrack): Long
 
@@ -60,7 +72,7 @@ interface PlaylistDao {
     fun getPlaylistsWithCount(): Flow<List<PlaylistWithCount>>
 
     @Query("SELECT * FROM playlists WHERE coverUri IS NULL OR coverUri = ''")
-    fun getPlaylistsMissingCover(): kotlinx.coroutines.flow.Flow<List<PlaylistEntity>>
+    fun getPlaylistsMissingCover(): Flow<List<PlaylistEntity>>
 
     @Query("SELECT * FROM playlists")
     fun getAllPlaylistsFlow(): Flow<List<PlaylistEntity>>

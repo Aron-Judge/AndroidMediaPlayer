@@ -8,14 +8,17 @@ import com.aron.mediaplayer.data.PlaylistDao
 import com.aron.mediaplayer.data.PlaylistEntity
 import com.aron.mediaplayer.data.PlaylistTrack
 import com.aron.mediaplayer.data.PlaylistWithCount
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class PlaylistViewModel(private val dao: PlaylistDao) : ViewModel() {
+
+    // ✅ Search query state for live filtering
+    private val searchQuery = MutableStateFlow("")
+    fun setSearchQuery(query: String) {
+        searchQuery.value = query
+    }
+    fun getSearchQuery(): StateFlow<String> = searchQuery.asStateFlow()
 
     val playlists: StateFlow<List<PlaylistEntity>> =
         dao.getAllPlaylists()
@@ -25,9 +28,26 @@ class PlaylistViewModel(private val dao: PlaylistDao) : ViewModel() {
         dao.getPlaylistsWithCount()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Existing: unfiltered playlist tracks
     fun getTracksForPlaylist(playlistId: Long): StateFlow<List<PlaylistTrack>> =
         dao.getTracksForPlaylist(playlistId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // ✅ New: live search version — matches title OR artist, updates as user types
+    fun getTracksForPlaylistLive(playlistId: Long): StateFlow<List<PlaylistTrack>> {
+        return searchQuery
+            .debounce(150) // smooth typing
+            .map { it.trim() }
+            .distinctUntilChanged()
+            .flatMapLatest { q ->
+                if (q.isEmpty()) {
+                    dao.getTracksForPlaylist(playlistId)
+                } else {
+                    dao.searchTracksInPlaylist(playlistId, q)
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }
 
     fun addTrack(track: PlaylistTrack) = viewModelScope.launch { dao.insertTrack(track) }
     fun removeTrack(track: PlaylistTrack) = viewModelScope.launch { dao.deleteTrack(track) }

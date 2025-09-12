@@ -11,8 +11,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aron.mediaplayer.data.PlaylistTrack
+import java.util.Locale
 
 @Composable
 fun PlaylistTrackItem(
@@ -20,7 +25,8 @@ fun PlaylistTrackItem(
     isPlaying: Boolean,
     onPlay: () -> Unit,
     onDelete: () -> Unit,
-    onAddToOtherPlaylist: () -> Unit
+    onAddToOtherPlaylist: () -> Unit,
+    searchQuery: String = "" // ✅ New: pass current search text for highlighting
 ) {
     val highlight = Color(0xFF1DB954)
     val bgColor = if (isPlaying) highlight.copy(alpha = 0.15f) else Color.Transparent
@@ -39,8 +45,14 @@ fun PlaylistTrackItem(
                 .weight(1f)
                 .padding(start = 8.dp)
         ) {
-            Text(track.title, style = MaterialTheme.typography.titleMedium, color = textColor)
-            Text(track.artist, style = MaterialTheme.typography.bodyMedium, color = textColor)
+            Text(
+                text = highlightMatch(track.title, searchQuery, textColor),
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = highlightMatch(track.artist, searchQuery, textColor),
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
         IconButton(onClick = onPlay) {
             Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = textColor)
@@ -51,5 +63,28 @@ fun PlaylistTrackItem(
         TextButton(onClick = onAddToOtherPlaylist) {
             Text("Add…")
         }
+    }
+}
+
+/**
+ * Highlights the part of [text] that matches [query] (case-insensitive).
+ */
+private fun highlightMatch(text: String, query: String, normalColor: Color): AnnotatedString {
+    if (query.isBlank()) return AnnotatedString(text)
+
+    val lowerText = text.lowercase(Locale.getDefault())
+    val lowerQuery = query.lowercase(Locale.getDefault())
+    val startIndex = lowerText.indexOf(lowerQuery)
+
+    return if (startIndex >= 0) {
+        buildAnnotatedString {
+            append(text.substring(0, startIndex))
+            pushStyle(SpanStyle(fontWeight = FontWeight.Bold, color = normalColor))
+            append(text.substring(startIndex, startIndex + query.length))
+            pop()
+            append(text.substring(startIndex + query.length))
+        }
+    } else {
+        AnnotatedString(text)
     }
 }

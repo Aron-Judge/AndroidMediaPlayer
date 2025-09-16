@@ -2,7 +2,6 @@
     androidx.compose.material3.ExperimentalMaterial3Api::class,
     androidx.compose.foundation.ExperimentalFoundationApi::class
 )
-
 package com.aron.mediaplayer.ui.screens
 
 import android.content.Intent
@@ -15,7 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -32,11 +31,10 @@ import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
 import com.aron.mediaplayer.data.*
 import com.aron.mediaplayer.service.PlaybackService
-import com.aron.mediaplayer.ui.components.EditPlaylistDialog
-import com.aron.mediaplayer.ui.components.PlaylistPickerDialog
+import com.aron.mediaplayer.ui.components.PlaylistManageDialogs
 import com.aron.mediaplayer.ui.components.PlaylistTrackItem
+import com.aron.mediaplayer.ui.components.SharedPlaylistPicker
 import com.aron.mediaplayer.viewmodel.PlaylistViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @UnstableApi
@@ -48,64 +46,23 @@ fun PlaylistDetailScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val dao = remember { AppDatabase.getInstance(context).playlistDao() }
-    val activeStore = remember { ActivePlaylistStore(context, dao) }
+    val dao = remember { AppDatabase.getInstance(context) }
+    val activeStore = remember { ActivePlaylistStore(context, dao.playlistDao()) }
     val scope = rememberCoroutineScope()
 
     val playlist by produceState<PlaylistEntity?>(initialValue = null, playlistId) {
-        value = dao.getPlaylistById(playlistId)
+        value = dao.playlistDao().getPlaylistById(playlistId)
     }
 
     val tracks by viewModel.getTracksForPlaylistLive(playlistId).collectAsState()
     val searchText by viewModel.getSearchQuery().collectAsState()
-
-    val playlists by dao.getAllPlaylists().collectAsState(initial = emptyList())
+    val playlists by dao.playlistDao().getAllPlaylists().collectAsState(initial = emptyList())
 
     var showPicker by remember { mutableStateOf(false) }
     var targetSong by remember { mutableStateOf<PlaylistTrack?>(null) }
     var showEditDialog by remember { mutableStateOf(false) }
-
-    if (showPicker && targetSong != null) {
-        PlaylistPickerDialog(
-            playlists = playlists,
-            onCreateNew = { name ->
-                val song = targetSong
-                showPicker = false
-                scope.launch(Dispatchers.IO) {
-                    val newId = dao.insertPlaylist(PlaylistEntity(name = name))
-                    song?.let { s -> dao.insertTrack(s.copy(playlistId = newId)) }
-                    activeStore.setActivePlaylistId(newId)
-                }
-            },
-            onSelect = { playlist ->
-                val song = targetSong
-                showPicker = false
-                scope.launch(Dispatchers.IO) {
-                    song?.let { s -> dao.insertTrack(s.copy(playlistId = playlist.playlistId)) }
-                    activeStore.setActivePlaylistId(playlist.playlistId)
-                }
-            },
-            onDismiss = { showPicker = false }
-        )
-    }
-
-    if (showEditDialog && playlist != null) {
-        EditPlaylistDialog(
-            playlist = playlist!!,
-            onSave = { newName, newDesc, newCover ->
-                scope.launch(Dispatchers.IO) {
-                    dao.updatePlaylist(
-                        playlist!!.copy(
-                            name = newName,
-                            description = newDesc,
-                            coverUri = newCover
-                        )
-                    )
-                }
-            },
-            onDismiss = { showEditDialog = false }
-        )
-    }
+    var menuExpanded by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -118,8 +75,27 @@ fun PlaylistDetailScreen(
                 },
                 actions = {
                     if (playlist != null) {
-                        IconButton(onClick = { showEditDialog = true }) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit Playlist")
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit details") },
+                                onClick = {
+                                    showEditDialog = true
+                                    menuExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete playlist") },
+                                onClick = {
+                                    showDeleteDialog = true
+                                    menuExpanded = false
+                                }
+                            )
                         }
                     }
                 }
@@ -244,7 +220,7 @@ fun PlaylistDetailScreen(
                                 val intent = Intent(context, PlaybackService::class.java).apply {
                                     action = PlaybackService.ACTION_PLAY
                                     putExtra(PlaybackService.EXTRA_URI, track.uri)
-                                    putExtra(PlaybackService.EXTRA_PLAYLIST_ID, playlistId) // ✅ added
+                                    putExtra(PlaybackService.EXTRA_PLAYLIST_ID, playlistId)
                                 }
                                 ContextCompat.startForegroundService(context, intent)
                             },
@@ -261,6 +237,28 @@ fun PlaylistDetailScreen(
             }
         }
     }
+
+    // Shared picker
+    SharedPlaylistPicker(
+        showPicker = showPicker,
+        targetSong = targetSong,
+        playlists = playlists,
+        dao = dao.playlistDao(),
+        activeStore = activeStore,
+        scope = scope,
+        onDismiss = { showPicker = false }
+    )
+
+    // Shared edit/delete
+    PlaylistManageDialogs(
+        playlistToEdit = if (showEditDialog) playlist else null,
+        onEditDismiss = { showEditDialog = false },
+        playlistToDelete = if (showDeleteDialog) playlist else null,
+        onDeleteDismiss = { showDeleteDialog = false },
+        dao = dao,
+        scope = scope,
+        onDeleted = { onBack() }
+    )
 }
 
 private fun formatDuration(ms: Long): String {

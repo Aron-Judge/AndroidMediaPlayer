@@ -18,8 +18,8 @@ import androidx.room.*
 )
 data class PlaylistTrack(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val playlistId: Long,            // NEW: which playlist it belongs to
-    val uri: String,
+    val playlistId: Long,            // which playlist it belongs to
+    val uri: String,                 // content:// URI for the track
     val title: String,
     val artist: String,
     val duration: Long,

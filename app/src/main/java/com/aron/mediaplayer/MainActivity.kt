@@ -11,11 +11,13 @@ import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
@@ -92,11 +94,8 @@ fun MediaPlayerApp() {
 
     LaunchedEffect(Unit) { requestPermission() }
 
-    val currentPlayingUri by nowPlayingViewModel.currentUri.collectAsState()
     val songs by songsViewModel.songs.collectAsState()
     val playlistsWithCount by playlistViewModel.playlistsWithCount.collectAsState()
-
-    // NEW: Smarter detection for missing or broken covers
     val playlistsMissingCover by playlistViewModel
         .getPlaylistsNeedingCover(context)
         .collectAsState(initial = emptyList())
@@ -131,7 +130,6 @@ fun MediaPlayerApp() {
                 Screen.Songs -> SongsScreen(
                     hasPermission = hasPermission,
                     songs = songs,
-                    currentPlayingUri = currentPlayingUri,
                     onRequestPermission = requestPermission
                 )
                 Screen.Playlists -> PlaylistListScreen(
@@ -153,15 +151,19 @@ fun MediaPlayerApp() {
                         }
                     }
                 )
-                is Screen.PlaylistDetail -> PlaylistDetailScreen(
-                    playlistId = screen.id,
-                    viewModel = playlistViewModel,
-                    currentPlayingUri = currentPlayingUri,
-                    onBack = { currentScreen = Screen.Playlists }
-                )
+                is Screen.PlaylistDetail -> {
+                    val listState = rememberSaveable(screen.id, saver = LazyListState.Saver) {
+                        LazyListState()
+                    }
+                    PlaylistDetailScreen(
+                        playlistId = screen.id,
+                        viewModel = playlistViewModel,
+                        listState = listState,
+                        onBack = { currentScreen = Screen.Playlists }
+                    )
+                }
             }
 
-            // Recovery prompt for missing/broken covers
             if (playlistsMissingCover.isNotEmpty()) {
                 MissingCoversDialog(
                     playlists = playlistsMissingCover,
@@ -186,6 +188,5 @@ fun MediaPlayerDarkTheme(content: @Composable () -> Unit) {
         onBackground = Color.White,
         onSurface = Color.White
     )
-
     MaterialTheme(colorScheme = colorScheme, content = content)
 }

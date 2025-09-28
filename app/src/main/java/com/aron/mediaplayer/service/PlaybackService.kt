@@ -207,8 +207,12 @@ class PlaybackService : MediaSessionService() {
                     val indexInPlaylist = playlistTracks.indexOfFirst { it.uri == uri }
 
                     if (indexInPlaylist >= 0) {
+                        // ✅ only set active playlist if it’s different
                         serviceScope.launch {
-                            activeStore.setActivePlaylistId(pid) // ✅ now in coroutine
+                            val current = activeStore.activePlaylistId.first()
+                            if (current != pid) {
+                                activeStore.setActivePlaylistId(pid)
+                            }
                         }
                         loadPlaylistIntoPlayer(playlistTracks, indexInPlaylist, 0, true)
                     } else {

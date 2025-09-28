@@ -22,6 +22,7 @@ import androidx.media3.common.util.UnstableApi
 import com.aron.mediaplayer.data.*
 import com.aron.mediaplayer.service.PlaybackService
 import com.aron.mediaplayer.ui.components.PlaylistPickerDialog
+import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -29,7 +30,6 @@ import kotlinx.coroutines.launch
 fun SongsScreen(
     hasPermission: Boolean,
     songs: List<Song>,
-    currentPlayingUri: String?,
     onRequestPermission: () -> Unit
 ) {
     val context = LocalContext.current
@@ -39,6 +39,10 @@ fun SongsScreen(
     val playlists by dao.getAllPlaylists().collectAsState(initial = emptyList())
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // 👇 Collect current playing URI inside the screen
+    val nowPlayingViewModel: NowPlayingViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val currentPlayingUri by nowPlayingViewModel.currentUri.collectAsState()
 
     Scaffold(snackbarHost = { SnackbarHost(hostState = snackbarHostState) }) { padding ->
         Box(modifier = Modifier.padding(padding)) {
@@ -84,7 +88,7 @@ fun SongsScreen(
             playlists = playlists,
             onCreateNew = { name ->
                 val song = showPickerForSong
-                showPickerForSong = null // close instantly via onDismiss
+                showPickerForSong = null
                 coroutineScope.launch(Dispatchers.IO) {
                     val newId = dao.insertPlaylist(PlaylistEntity(name = name))
                     song?.let { s ->

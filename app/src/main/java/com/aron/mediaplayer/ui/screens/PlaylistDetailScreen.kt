@@ -5,13 +5,11 @@
 package com.aron.mediaplayer.ui.screens
 
 import android.content.Intent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
@@ -34,6 +32,7 @@ import com.aron.mediaplayer.service.PlaybackService
 import com.aron.mediaplayer.ui.components.PlaylistManageDialogs
 import com.aron.mediaplayer.ui.components.PlaylistTrackItem
 import com.aron.mediaplayer.ui.components.SharedPlaylistPicker
+import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import com.aron.mediaplayer.viewmodel.PlaylistViewModel
 import kotlinx.coroutines.launch
 
@@ -42,7 +41,7 @@ import kotlinx.coroutines.launch
 fun PlaylistDetailScreen(
     playlistId: Long,
     viewModel: PlaylistViewModel,
-    currentPlayingUri: String?,
+    listState: LazyListState,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -57,6 +56,10 @@ fun PlaylistDetailScreen(
     val tracks by viewModel.getTracksForPlaylistLive(playlistId).collectAsState()
     val searchText by viewModel.getSearchQuery().collectAsState()
     val playlists by dao.playlistDao().getAllPlaylists().collectAsState(initial = emptyList())
+
+    // 👇 Collect current playing URI inside the screen
+    val nowPlayingViewModel: NowPlayingViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val currentPlayingUri by nowPlayingViewModel.currentUri.collectAsState()
 
     var showPicker by remember { mutableStateOf(false) }
     var targetSong by remember { mutableStateOf<PlaylistTrack?>(null) }
@@ -102,7 +105,10 @@ fun PlaylistDetailScreen(
             )
         }
     ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding)) {
+        LazyColumn(
+            modifier = Modifier.padding(padding),
+            state = listState
+        ) {
             // Header
             item {
                 Column(
@@ -156,8 +162,6 @@ fun PlaylistDetailScreen(
                     )
 
                     Spacer(Modifier.height(12.dp))
-
-                    // Search bar
                     OutlinedTextField(
                         value = searchText,
                         onValueChange = { viewModel.setSearchQuery(it) },
@@ -171,11 +175,7 @@ fun PlaylistDetailScreen(
 
             // Empty state
             item {
-                AnimatedVisibility(
-                    visible = tracks.isEmpty(),
-                    enter = fadeIn(),
-                    exit = fadeOut()
-                ) {
+                if (tracks.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -206,39 +206,33 @@ fun PlaylistDetailScreen(
             }
 
             // Track list
-            if (tracks.isNotEmpty()) {
-                itemsIndexed(tracks, key = { _, track -> track.id }) { _, track ->
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = fadeIn(),
-                        exit = fadeOut()
-                    ) {
-                        PlaylistTrackItem(
-                            track = track,
-                            isPlaying = track.uri == currentPlayingUri,
-                            onPlay = {
-                                val intent = Intent(context, PlaybackService::class.java).apply {
-                                    action = PlaybackService.ACTION_PLAY
-                                    putExtra(PlaybackService.EXTRA_URI, track.uri)
-                                    putExtra(PlaybackService.EXTRA_PLAYLIST_ID, playlistId)
-                                }
-                                ContextCompat.startForegroundService(context, intent)
-                            },
-                            onDelete = { viewModel.removeTrack(track) },
-                            onAddToOtherPlaylist = {
-                                targetSong = track
-                                showPicker = true
-                            },
-                            searchQuery = searchText,
-                            modifier = Modifier.animateItemPlacement()
-                        )
-                    }
-                }
+            itemsIndexed(
+                tracks,
+                key = { _, track -> track.id }
+            ) { _, track ->
+                PlaylistTrackItem(
+                    track = track,
+                    isPlaying = track.uri == currentPlayingUri,
+                    onPlay = {
+                        val intent = Intent(context, PlaybackService::class.java).apply {
+                            action = PlaybackService.ACTION_PLAY
+                            putExtra(PlaybackService.EXTRA_URI, track.uri)
+                            putExtra(PlaybackService.EXTRA_PLAYLIST_ID, playlistId)
+                        }
+                        ContextCompat.startForegroundService(context, intent)
+                    },
+                    onDelete = { viewModel.removeTrack(track) },
+                    onAddToOtherPlaylist = {
+                        targetSong = track
+                        showPicker = true
+                    },
+                    searchQuery = searchText,
+                    modifier = Modifier.animateItemPlacement()
+                )
             }
         }
     }
 
-    // Shared picker
     SharedPlaylistPicker(
         showPicker = showPicker,
         targetSong = targetSong,
@@ -249,7 +243,6 @@ fun PlaylistDetailScreen(
         onDismiss = { showPicker = false }
     )
 
-    // Shared edit/delete
     PlaylistManageDialogs(
         playlistToEdit = if (showEditDialog) playlist else null,
         onEditDismiss = { showEditDialog = false },

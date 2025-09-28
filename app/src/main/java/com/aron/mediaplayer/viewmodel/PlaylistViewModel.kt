@@ -42,8 +42,10 @@ class PlaylistViewModel(private val dao: PlaylistDao) : ViewModel() {
             .flatMapLatest { q ->
                 if (q.isEmpty()) {
                     dao.getTracksForPlaylist(playlistId)
+                        .distinctUntilChanged()   // 👈 prevent redundant emissions
                 } else {
                     dao.searchTracksInPlaylist(playlistId, q)
+                        .distinctUntilChanged()   // 👈 same here
                 }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

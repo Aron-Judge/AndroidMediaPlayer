@@ -134,7 +134,7 @@ fun SongsScreen(
 
 @Composable
 fun SongItem(song: Song, isPlaying: Boolean, onPlay: () -> Unit, onAddToPlaylist: () -> Unit) {
-    val highlight = Color(0xFF1DB954)
+    val highlight = Color(0xFF00EEFF)
     val bgColor = if (isPlaying) highlight.copy(alpha = 0.15f) else Color.Transparent
     val textColor = if (isPlaying) highlight else MaterialTheme.colorScheme.onBackground
 

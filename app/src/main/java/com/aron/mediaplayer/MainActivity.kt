@@ -179,7 +179,7 @@ fun MediaPlayerApp() {
 @Composable
 fun MediaPlayerDarkTheme(content: @Composable () -> Unit) {
     val colorScheme = darkColorScheme(
-        primary = Color(0xFF1DB954),
+        primary = Color(0xFF00EEFF),
         onPrimary = Color.White,
         background = Color.Black,
         surface = Color.Black,

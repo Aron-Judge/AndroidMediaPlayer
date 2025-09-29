@@ -32,6 +32,7 @@ import com.aron.mediaplayer.service.PlaybackService
 import com.aron.mediaplayer.ui.components.PlaylistManageDialogs
 import com.aron.mediaplayer.ui.components.PlaylistTrackItem
 import com.aron.mediaplayer.ui.components.SharedPlaylistPicker
+import com.aron.mediaplayer.ui.components.NowPlayingBar
 import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import com.aron.mediaplayer.viewmodel.PlaylistViewModel
 import kotlinx.coroutines.launch
@@ -57,9 +58,11 @@ fun PlaylistDetailScreen(
     val searchText by viewModel.getSearchQuery().collectAsState()
     val playlists by dao.playlistDao().getAllPlaylists().collectAsState(initial = emptyList())
 
-    // 👇 Collect current playing URI inside the screen
+    // 👇 Collect current playing state
     val nowPlayingViewModel: NowPlayingViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val currentPlayingUri by nowPlayingViewModel.currentUri.collectAsState()
+    val isPlaying by nowPlayingViewModel.isPlaying.collectAsState(initial = false)
+    val currentSong by nowPlayingViewModel.currentSong.collectAsState(initial = null)
 
     var showPicker by remember { mutableStateOf(false) }
     var targetSong by remember { mutableStateOf<PlaylistTrack?>(null) }
@@ -103,6 +106,18 @@ fun PlaylistDetailScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            if (currentSong != null) {
+                NowPlayingBar(
+                    title = currentSong!!.title,
+                    artist = currentSong!!.artist,
+                    artworkUri = currentSong!!.artworkUri,
+                    isPlaying = isPlaying,
+                    onPlayPause = { nowPlayingViewModel.togglePlayPause() },
+                    onExpand = { /* TODO: navigate to full player screen */ }
+                )
+            }
         }
     ) { padding ->
         LazyColumn(

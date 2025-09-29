@@ -1,3 +1,4 @@
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
 package com.aron.mediaplayer.service
 
 import android.Manifest
@@ -15,7 +16,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -29,13 +29,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 
-@UnstableApi
 class PlaybackService : MediaSessionService() {
 
     private lateinit var player: ExoPlayer
     private var mediaSession: MediaSession? = null
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // ✅ Use an explicit job so we can cancel cleanly
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(serviceJob + Dispatchers.Main.immediate)
+
     private var playlistJob: Job? = null
     private lateinit var dao: PlaylistDao
     private lateinit var activeStore: ActivePlaylistStore
@@ -66,16 +68,43 @@ class PlaybackService : MediaSessionService() {
 
         private val _currentUri = MutableStateFlow<String?>(null)
         val currentUri: StateFlow<String?> = _currentUri
+
+        private val _isPlaying = MutableStateFlow(false)
+        val isPlaying: StateFlow<Boolean> = _isPlaying
+
+        private val _currentSong = MutableStateFlow<PlaylistTrack?>(null)
+        val currentSong: StateFlow<PlaylistTrack?> = _currentSong
+
+        @Volatile
+        private var serviceInstance: PlaybackService? = null
+
+        fun togglePlayPause() {
+            val service = serviceInstance ?: return
+            if (service.player.isPlaying) service.player.pause() else service.player.play()
+        }
     }
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            _isPlaying.value = isPlaying
             maybeUpdateNotification()
             savePlaybackState()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            _currentUri.value = mediaItem?.localConfiguration?.uri.toString()
+            _currentUri.value = mediaItem?.localConfiguration?.uri?.toString()
+            mediaItem?.let { item ->
+                val mm = item.mediaMetadata
+                _currentSong.value = PlaylistTrack(
+                    id = item.mediaId.toLongOrNull() ?: 0L,
+                    playlistId = -1,
+                    uri = item.localConfiguration?.uri?.toString() ?: "",
+                    title = mm.title?.toString() ?: "Unknown Title",
+                    artist = mm.artist?.toString() ?: "Unknown Artist",
+                    duration = 0L,
+                    artworkUri = mm.artworkUri?.toString()
+                )
+            }
             maybeUpdateNotification()
             savePlaybackState()
         }
@@ -102,6 +131,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        serviceInstance = this
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
         player = ExoPlayer.Builder(this).build().apply {
@@ -140,10 +170,11 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         savePlaybackState()
         playlistJob?.cancel()
-        serviceScope.cancel()
+        serviceJob.cancel()   // ✅ cancel the scope cleanly
         player.removeListener(playerListener)
         mediaSession?.release()
         player.release()
+        serviceInstance = null
         super.onDestroy()
     }
 
@@ -207,7 +238,6 @@ class PlaybackService : MediaSessionService() {
                     val indexInPlaylist = playlistTracks.indexOfFirst { it.uri == uri }
 
                     if (indexInPlaylist >= 0) {
-                        // ✅ only set active playlist if it’s different
                         serviceScope.launch {
                             val current = activeStore.activePlaylistId.first()
                             if (current != pid) {
@@ -216,8 +246,10 @@ class PlaybackService : MediaSessionService() {
                         }
                         loadPlaylistIntoPlayer(playlistTracks, indexInPlaylist, 0, true)
                     } else {
-                        getSongFromMediaStore(uri)?.let {
-                            loadPlaylistIntoPlayer(listOf(it), 0, 0, true)
+                        getSongFromMediaStore(uri)?.let { track ->
+                            _currentSong.value = track
+                            _currentUri.value = track.uri
+                            loadPlaylistIntoPlayer(listOf(track), 0, 0, true)
                         }
                     }
                 } else {
@@ -290,9 +322,21 @@ class PlaybackService : MediaSessionService() {
         val mediaItems = buildMediaItems(playlistTracks)
         player.setMediaItems(mediaItems)
         player.seekTo(startIndex, startPositionMs)
-        mediaItems.getOrNull(startIndex)?.localConfiguration?.uri?.toString()?.let {
-            _currentUri.value = it
+
+        mediaItems.getOrNull(startIndex)?.let { item ->
+            _currentUri.value = item.localConfiguration?.uri?.toString()
+            val mm = item.mediaMetadata
+            _currentSong.value = PlaylistTrack(
+                id = item.mediaId.toLongOrNull() ?: 0L,
+                playlistId = playlistTracks.getOrNull(startIndex)?.playlistId ?: -1,
+                uri = _currentUri.value ?: "",
+                title = mm.title?.toString() ?: "Unknown Title",
+                artist = mm.artist?.toString() ?: "Unknown Artist",
+                duration = playlistTracks.getOrNull(startIndex)?.duration ?: 0L,
+                artworkUri = mm.artworkUri?.toString()
+            )
         }
+
         player.prepare()
         if (autoPlay) player.play()
     }
@@ -309,6 +353,7 @@ class PlaybackService : MediaSessionService() {
             player.setMediaItems(emptyList())
             player.pause()
             _currentUri.value = null
+            _currentSong.value = null
             return
         }
 
@@ -319,6 +364,16 @@ class PlaybackService : MediaSessionService() {
         if (sameItemIndex >= 0) {
             player.seekTo(sameItemIndex, oldPos)
             _currentUri.value = newItems[sameItemIndex].localConfiguration?.uri.toString()
+            val mm = newItems[sameItemIndex].mediaMetadata
+            _currentSong.value = PlaylistTrack(
+                id = newItems[sameItemIndex].mediaId.toLongOrNull() ?: 0L,
+                playlistId = tracks.getOrNull(sameItemIndex)?.playlistId ?: -1,
+                uri = _currentUri.value ?: "",
+                title = mm.title?.toString() ?: "Unknown Title",
+                artist = mm.artist?.toString() ?: "Unknown Artist",
+                duration = tracks.getOrNull(sameItemIndex)?.duration ?: 0L,
+                artworkUri = mm.artworkUri?.toString()
+            )
             if (wasPlaying) player.play()
             return
         }
@@ -334,6 +389,18 @@ class PlaybackService : MediaSessionService() {
 
         player.seekTo(targetIndex, 0L)
         _currentUri.value = newItems[targetIndex].localConfiguration?.uri.toString()
+
+        val mm = newItems[targetIndex].mediaMetadata
+        _currentSong.value = PlaylistTrack(
+            id = newItems[targetIndex].mediaId.toLongOrNull() ?: 0L,
+            playlistId = tracks.getOrNull(targetIndex)?.playlistId ?: -1,
+            uri = _currentUri.value ?: "",
+            title = mm.title?.toString() ?: "Unknown Title",
+            artist = mm.artist?.toString() ?: "Unknown Artist",
+            duration = tracks.getOrNull(targetIndex)?.duration ?: 0L,
+            artworkUri = mm.artworkUri?.toString()
+        )
+
         if (wasPlaying) player.play()
     }
 
@@ -407,12 +474,10 @@ class PlaybackService : MediaSessionService() {
                     .setShowActionsInCompactView(0, 1, 2)
             )
 
-        // Use cached artwork immediately if present
         artworkCache[artUri]?.let { cachedBmp ->
             return builder.setLargeIcon(cachedBmp).build()
         }
 
-        // Load artwork in background if not cached
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val bmp = Glide.with(this@PlaybackService)

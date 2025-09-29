@@ -22,6 +22,7 @@ import androidx.media3.common.util.UnstableApi
 import com.aron.mediaplayer.data.*
 import com.aron.mediaplayer.service.PlaybackService
 import com.aron.mediaplayer.ui.components.PlaylistPickerDialog
+import com.aron.mediaplayer.ui.components.NowPlayingBar
 import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -40,12 +41,28 @@ fun SongsScreen(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // 👇 Collect current playing URI inside the screen
+    // 👇 Collect playback state
     val nowPlayingViewModel: NowPlayingViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val currentPlayingUri by nowPlayingViewModel.currentUri.collectAsState()
+    val isPlaying by nowPlayingViewModel.isPlaying.collectAsState()
+    val currentSong by nowPlayingViewModel.currentSong.collectAsState()
 
-    Scaffold(snackbarHost = { SnackbarHost(hostState = snackbarHostState) }) { padding ->
-        Box(modifier = Modifier.padding(padding)) {
+    Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        bottomBar = {
+            if (currentSong != null) {
+                NowPlayingBar(
+                    title = currentSong!!.title,
+                    artist = currentSong!!.artist,
+                    artworkUri = currentSong!!.artworkUri,
+                    isPlaying = isPlaying,
+                    onPlayPause = { nowPlayingViewModel.togglePlayPause() },
+                    onExpand = { /* TODO: navigate to full player screen */ }
+                )
+            }
+        }
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding)) {
             when {
                 !hasPermission -> Box(
                     Modifier

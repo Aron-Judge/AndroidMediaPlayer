@@ -28,13 +28,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 class PlaybackService : MediaSessionService() {
 
-    private lateinit var player: ExoPlayer
-    private var mediaSession: MediaSession? = null
+    internal lateinit var player: ExoPlayer
+        private set
 
-    // ✅ Use an explicit job so we can cancel cleanly
+    private var mediaSession: MediaSession? = null
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(serviceJob + Dispatchers.Main.immediate)
 
@@ -78,9 +79,12 @@ class PlaybackService : MediaSessionService() {
         @Volatile
         private var serviceInstance: PlaybackService? = null
 
+        // 🔹 Public accessor for the player
+        val player: ExoPlayer?
+            get() = serviceInstance?.player
+
         fun togglePlayPause() {
-            val service = serviceInstance ?: return
-            if (service.player.isPlaying) service.player.pause() else service.player.play()
+            player?.let { if (it.isPlaying) it.pause() else it.play() }
         }
     }
 
@@ -117,6 +121,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    // 🔹 Restored helper
     private fun maybeUpdateNotification() {
         if (Build.VERSION.SDK_INT < 33 ||
             ContextCompat.checkSelfPermission(
@@ -138,16 +143,7 @@ class PlaybackService : MediaSessionService() {
             addListener(playerListener)
             repeatMode = Player.REPEAT_MODE_ALL
         }
-        mediaSession = MediaSession.Builder(this, player)
-            .setSessionActivity(
-                PendingIntent.getActivity(
-                    this,
-                    0,
-                    Intent(this, Class.forName("com.aron.mediaplayer.MainActivity")),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                )
-            )
-            .build()
+        mediaSession = MediaSession.Builder(this, player).build()
 
         createNotificationChannel()
 
@@ -170,7 +166,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         savePlaybackState()
         playlistJob?.cancel()
-        serviceJob.cancel()   // ✅ cancel the scope cleanly
+        serviceJob.cancel()
         player.removeListener(playerListener)
         mediaSession?.release()
         player.release()

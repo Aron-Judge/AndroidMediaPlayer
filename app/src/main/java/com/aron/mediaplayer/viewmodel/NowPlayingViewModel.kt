@@ -10,18 +10,25 @@ import kotlinx.coroutines.flow.stateIn
 
 class NowPlayingViewModel : ViewModel() {
 
-    // Currently playing track URI
     val currentUri: StateFlow<String?> = PlaybackServiceConnection.currentUri
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    // Whether playback is active
     val isPlaying: StateFlow<Boolean> = PlaybackServiceConnection.isPlaying
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    // Full track metadata (title, artist, artwork)
     val currentSong: StateFlow<PlaylistTrack?> = PlaybackServiceConnection.currentSong
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    // Control methods
+    // 🔹 Playback position and duration
+    val positionMs: StateFlow<Long> = PlaybackServiceConnection.positionMs
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+
+    val durationMs: StateFlow<Long> = PlaybackServiceConnection.durationMs
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+
+    // Controls
     fun togglePlayPause() = PlaybackServiceConnection.togglePlayPause()
+    fun seekTo(position: Long) = PlaybackServiceConnection.seekTo(position)
+    fun skipToNext() = PlaybackServiceConnection.skipToNext()
+    fun skipToPrevious() = PlaybackServiceConnection.skipToPrevious()
 }

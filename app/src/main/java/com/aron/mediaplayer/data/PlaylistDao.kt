@@ -28,19 +28,16 @@ interface PlaylistDao {
     @Delete
     suspend fun deletePlaylist(playlist: PlaylistEntity)
 
-    // NEW: update only description
     @Query("UPDATE playlists SET description = :description WHERE playlistId = :playlistId")
     suspend fun updatePlaylistDescription(playlistId: Long, description: String?)
 
-    // NEW: update only cover image
     @Query("UPDATE playlists SET coverUri = :coverUri WHERE playlistId = :playlistId")
     suspend fun updatePlaylistCover(playlistId: Long, coverUri: String?)
 
     // — Tracks in a playlist —
-    @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY id ASC")
+    @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position ASC")
     fun getTracksForPlaylist(playlistId: Long): Flow<List<PlaylistTrack>>
 
-    // ✅ NEW: Search tracks in playlist by title OR artist (case-insensitive, partial match)
     @Query("""
         SELECT * FROM playlist_tracks
         WHERE playlistId = :playlistId
@@ -48,7 +45,7 @@ interface PlaylistDao {
               LOWER(title) LIKE LOWER('%' || :query || '%')
               OR LOWER(artist) LIKE LOWER('%' || :query || '%')
           )
-        ORDER BY id ASC
+        ORDER BY position ASC
     """)
     fun searchTracksInPlaylist(playlistId: Long, query: String): Flow<List<PlaylistTrack>>
 

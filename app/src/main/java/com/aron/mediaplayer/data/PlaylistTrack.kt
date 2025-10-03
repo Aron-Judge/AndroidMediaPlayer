@@ -23,5 +23,6 @@ data class PlaylistTrack(
     val title: String,
     val artist: String,
     val duration: Long,
-    val artworkUri: String? = null
+    val artworkUri: String? = null,
+    val position: Int = 0                // 👈 explicit order within playlist
 )

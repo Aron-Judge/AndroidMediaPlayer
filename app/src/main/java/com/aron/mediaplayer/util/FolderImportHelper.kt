@@ -119,7 +119,8 @@ private suspend fun queryAndInsert(
                     title = title,
                     artist = artist,
                     duration = duration,
-                    artworkUri = artworkUri
+                    artworkUri = artworkUri,
+                    position = 0 // placeholder, will be set after sorting
                 ) to fileName
             )
         }
@@ -131,7 +132,7 @@ private suspend fun queryAndInsert(
     ))
 
     sorted.forEachIndexed { index, (track, fileName) ->
-        dao.insertTrack(track)
+        dao.insertTrack(track.copy(position = index))
         Log.d(TAG, "$logPrefix Inserted track #$index: ${track.title} (${track.artist}) from $fileName")
     }
 
@@ -189,7 +190,8 @@ private suspend fun queryAndInsertFallback(
                     title = title,
                     artist = artist,
                     duration = duration,
-                    artworkUri = artworkUri
+                    artworkUri = artworkUri,
+                    position = 0 // placeholder
                 ) to fileName
             )
         }
@@ -201,7 +203,7 @@ private suspend fun queryAndInsertFallback(
     ))
 
     sorted.forEachIndexed { index, (track, fileName) ->
-        dao.insertTrack(track)
+        dao.insertTrack(track.copy(position = index))
         Log.d(TAG, "[Fallback] Inserted track #$index: ${track.title} (${track.artist}) from $fileName")
     }
 

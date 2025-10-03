@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [PlaylistEntity::class, PlaylistTrack::class],
-    version = 2, // bump from your current version
+    version = 3, // bumped from 2 → 3
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -18,10 +18,20 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
 
+        // Migration 1 → 2: add description + coverUri to playlists
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE playlists ADD COLUMN description TEXT")
                 database.execSQL("ALTER TABLE playlists ADD COLUMN coverUri TEXT")
+            }
+        }
+
+        // Migration 2 → 3: add position column to playlist_tracks
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE playlist_tracks ADD COLUMN position INTEGER NOT NULL DEFAULT 0"
+                )
             }
         }
 
@@ -32,7 +42,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "app_db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { INSTANCE = it }
             }

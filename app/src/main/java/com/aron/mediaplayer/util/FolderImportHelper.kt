@@ -13,6 +13,19 @@ import kotlinx.coroutines.withContext
 
 private const val TAG = "FolderImport"
 
+// Regex to capture leading digits like "001", "12", etc.
+private val prefixRegex = Regex("""^(\d+)\s*[-_ ]?.*""")
+
+private fun extractSortKey(fileName: String): Pair<Int, String> {
+    val match = prefixRegex.find(fileName)
+    val number = match?.groupValues?.get(1)?.toIntOrNull()
+    return if (number != null) {
+        number to fileName.lowercase()
+    } else {
+        Int.MAX_VALUE to fileName.lowercase()
+    }
+}
+
 suspend fun importFolderAsPlaylist(context: Context, folderUri: Uri) = withContext(Dispatchers.IO) {
     val dao = AppDatabase.getInstance(context).playlistDao()
 
@@ -63,21 +76,26 @@ private suspend fun queryAndInsert(
     folderPath: String,
     logPrefix: String
 ): Int {
-    var count = 0
+    val tracks = mutableListOf<Pair<PlaylistTrack, String>>() // track + filename
+
     context.contentResolver.query(
         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
         projection,
         "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DATA} LIKE ?",
         arrayOf("%$folderPath%"),
-        "${MediaStore.Audio.Media.TITLE} ASC"
+        null // no ORDER BY, we’ll sort ourselves
     )?.use { cursor ->
         val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
         val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
         val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
         val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
         val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+        val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
         while (cursor.moveToNext()) {
+            val filePath = cursor.getString(dataCol) ?: continue
+            val fileName = filePath.substringAfterLast('/')
+
             val id = cursor.getLong(idCol)
             val title = cursor.getString(titleCol) ?: "Unknown Title"
             val artist = cursor.getString(artistCol) ?: "Unknown Artist"
@@ -94,7 +112,7 @@ private suspend fun queryAndInsert(
                 albumId.toString()
             ).toString()
 
-            dao.insertTrack(
+            tracks.add(
                 PlaylistTrack(
                     playlistId = playlistId,
                     uri = contentUri.toString(),
@@ -102,13 +120,22 @@ private suspend fun queryAndInsert(
                     artist = artist,
                     duration = duration,
                     artworkUri = artworkUri
-                )
+                ) to fileName
             )
-            count++
-            Log.d(TAG, "$logPrefix Inserted track: $title ($artist) -> $contentUri")
         }
     }
-    return count
+
+    val sorted = tracks.sortedWith(compareBy(
+        { extractSortKey(it.second).first },
+        { extractSortKey(it.second).second }
+    ))
+
+    sorted.forEachIndexed { index, (track, fileName) ->
+        dao.insertTrack(track)
+        Log.d(TAG, "$logPrefix Inserted track #$index: ${track.title} (${track.artist}) from $fileName")
+    }
+
+    return sorted.size
 }
 
 private suspend fun queryAndInsertFallback(
@@ -118,13 +145,14 @@ private suspend fun queryAndInsertFallback(
     projection: Array<String>,
     folderPath: String
 ): Int {
-    var count = 0
+    val tracks = mutableListOf<Pair<PlaylistTrack, String>>() // track + filename
+
     context.contentResolver.query(
         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
         projection,
         "${MediaStore.Audio.Media.IS_MUSIC} != 0",
         null,
-        "${MediaStore.Audio.Media.TITLE} ASC"
+        null // no ORDER BY, we’ll sort ourselves
     )?.use { cursor ->
         val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
         val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
@@ -136,6 +164,7 @@ private suspend fun queryAndInsertFallback(
         while (cursor.moveToNext()) {
             val filePath = cursor.getString(dataCol) ?: continue
             if (!filePath.contains(folderPath, ignoreCase = true)) continue
+            val fileName = filePath.substringAfterLast('/')
 
             val id = cursor.getLong(idCol)
             val title = cursor.getString(titleCol) ?: "Unknown Title"
@@ -153,7 +182,7 @@ private suspend fun queryAndInsertFallback(
                 albumId.toString()
             ).toString()
 
-            dao.insertTrack(
+            tracks.add(
                 PlaylistTrack(
                     playlistId = playlistId,
                     uri = contentUri.toString(),
@@ -161,11 +190,20 @@ private suspend fun queryAndInsertFallback(
                     artist = artist,
                     duration = duration,
                     artworkUri = artworkUri
-                )
+                ) to fileName
             )
-            count++
-            Log.d(TAG, "[Fallback] Inserted track: $title ($artist) -> $contentUri")
         }
     }
-    return count
+
+    val sorted = tracks.sortedWith(compareBy(
+        { extractSortKey(it.second).first },
+        { extractSortKey(it.second).second }
+    ))
+
+    sorted.forEachIndexed { index, (track, fileName) ->
+        dao.insertTrack(track)
+        Log.d(TAG, "[Fallback] Inserted track #$index: ${track.title} (${track.artist}) from $fileName")
+    }
+
+    return sorted.size
 }

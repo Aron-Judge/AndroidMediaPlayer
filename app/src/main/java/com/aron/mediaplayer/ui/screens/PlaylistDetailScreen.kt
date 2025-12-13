@@ -36,6 +36,7 @@ import com.aron.mediaplayer.ui.components.NowPlayingBar
 import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import com.aron.mediaplayer.viewmodel.PlaylistViewModel
 import kotlinx.coroutines.launch
+import com.aron.mediaplayer.ui.components.FastScroller
 
 @UnstableApi
 @Composable
@@ -58,7 +59,7 @@ fun PlaylistDetailScreen(
     val searchText by viewModel.getSearchQuery().collectAsState()
     val playlists by dao.playlistDao().getAllPlaylists().collectAsState(initial = emptyList())
 
-    // 👇 Collect current playing state
+    // Now playing state
     val nowPlayingViewModel: NowPlayingViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val currentPlayingUri by nowPlayingViewModel.currentUri.collectAsState()
     val isPlaying by nowPlayingViewModel.isPlaying.collectAsState(initial = false)
@@ -115,136 +116,154 @@ fun PlaylistDetailScreen(
                     artworkUri = currentSong!!.artworkUri,
                     isPlaying = isPlaying,
                     onPlayPause = { nowPlayingViewModel.togglePlayPause() },
-                    onExpand = { /* TODO: navigate to full player screen */ }
+                    onExpand = { /* TODO */ }
                 )
             }
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.padding(padding),
-            state = listState
+
+        // WRAPPED WITH BOX TO OVERLAY FAST SCROLLER
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
         ) {
-            // Header
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color.DarkGray)
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    val artworkToShow = playlist?.coverUri ?: tracks.firstOrNull()?.artworkUri
-                    if (!artworkToShow.isNullOrBlank()) {
-                        AsyncImage(
-                            model = artworkToShow,
-                            contentDescription = "Playlist artwork",
-                            modifier = Modifier
-                                .size(180.dp)
-                                .background(Color.Black),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(180.dp)
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("♪", style = MaterialTheme.typography.displayLarge)
-                        }
-                    }
 
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = playlist?.name.orEmpty(),
-                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                    playlist?.description?.let { desc ->
-                        if (desc.isNotBlank()) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = desc,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.LightGray
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "${tracks.size} songs • ${formatDuration(tracks.sumOf { it.duration })}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
-                    )
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = listState
+            ) {
 
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = searchText,
-                        onValueChange = { viewModel.setSearchQuery(it) },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Search by song or artist") },
-                        singleLine = true,
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
-                    )
-                }
-            }
-
-            // Empty state
-            item {
-                if (tracks.isEmpty()) {
-                    Box(
+                // Header
+                item {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(32.dp),
-                        contentAlignment = Alignment.Center
+                            .background(Color.DarkGray)
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = if (searchText.isBlank()) Icons.Default.MusicNote else Icons.Default.Search,
-                                contentDescription = null,
-                                tint = Color.Gray,
-                                modifier = Modifier.size(48.dp)
+                        val artworkToShow = playlist?.coverUri ?: tracks.firstOrNull()?.artworkUri
+                        if (!artworkToShow.isNullOrBlank()) {
+                            AsyncImage(
+                                model = artworkToShow,
+                                contentDescription = "Playlist artwork",
+                                modifier = Modifier
+                                    .size(180.dp)
+                                    .background(Color.Black),
+                                contentScale = ContentScale.Crop
                             )
-                            Spacer(Modifier.height(8.dp))
-                            val message = if (searchText.isBlank()) {
-                                "This playlist is empty"
-                            } else {
-                                "No results found for \"$searchText\""
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(180.dp)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("♪", style = MaterialTheme.typography.displayLarge)
                             }
-                            Text(
-                                text = message,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.Gray
-                            )
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = playlist?.name.orEmpty(),
+                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        playlist?.description?.let { desc ->
+                            if (desc.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = desc,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.LightGray
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "${tracks.size} songs • ${formatDuration(tracks.sumOf { it.duration })}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = searchText,
+                            onValueChange = { viewModel.setSearchQuery(it) },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Search by song or artist") },
+                            singleLine = true,
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                        )
+                    }
+                }
+
+                // Empty state
+                item {
+                    if (tracks.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = if (searchText.isBlank()) Icons.Default.MusicNote else Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = Color.Gray,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                val message = if (searchText.isBlank()) {
+                                    "This playlist is empty"
+                                } else {
+                                    "No results found for \"$searchText\""
+                                }
+                                Text(
+                                    text = message,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.Gray
+                                )
+                            }
                         }
                     }
                 }
+
+                // Track list
+                itemsIndexed(
+                    tracks,
+                    key = { _, track -> track.id }
+                ) { _, track ->
+                    PlaylistTrackItem(
+                        track = track,
+                        isPlaying = track.uri == currentPlayingUri,
+                        onPlay = {
+                            val intent = Intent(context, PlaybackService::class.java).apply {
+                                action = PlaybackService.ACTION_PLAY
+                                putExtra(PlaybackService.EXTRA_URI, track.uri)
+                                putExtra(PlaybackService.EXTRA_PLAYLIST_ID, playlistId)
+                            }
+                            ContextCompat.startForegroundService(context, intent)
+                        },
+                        onDelete = { viewModel.removeTrack(track) },
+                        onAddToOtherPlaylist = {
+                            targetSong = track
+                            showPicker = true
+                        },
+                        searchQuery = searchText,
+                        modifier = Modifier.animateItemPlacement()
+                    )
+                }
             }
 
-            // Track list
-            itemsIndexed(
-                tracks,
-                key = { _, track -> track.id }
-            ) { _, track ->
-                PlaylistTrackItem(
-                    track = track,
-                    isPlaying = track.uri == currentPlayingUri,
-                    onPlay = {
-                        val intent = Intent(context, PlaybackService::class.java).apply {
-                            action = PlaybackService.ACTION_PLAY
-                            putExtra(PlaybackService.EXTRA_URI, track.uri)
-                            putExtra(PlaybackService.EXTRA_PLAYLIST_ID, playlistId)
-                        }
-                        ContextCompat.startForegroundService(context, intent)
-                    },
-                    onDelete = { viewModel.removeTrack(track) },
-                    onAddToOtherPlaylist = {
-                        targetSong = track
-                        showPicker = true
-                    },
-                    searchQuery = searchText,
-                    modifier = Modifier.animateItemPlacement()
-                )
-            }
+            FastScroller(
+                listState = listState,
+                itemCount = tracks.size,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 4.dp)
+            )
         }
     }
 

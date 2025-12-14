@@ -4,8 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,17 +23,16 @@ fun PlaylistTrackItem(
     track: PlaylistTrack,
     isPlaying: Boolean,
     onPlay: () -> Unit,
-    onDelete: () -> Unit,
-    onAddToOtherPlaylist: () -> Unit,
+    onMenuClick: () -> Unit,
     searchQuery: String = "",
-    modifier: Modifier = Modifier // ✅ added
+    modifier: Modifier = Modifier
 ) {
     val highlight = Color(0xFF00EEFF)
     val bgColor = if (isPlaying) highlight.copy(alpha = 0.15f) else Color.Transparent
     val textColor = if (isPlaying) highlight else MaterialTheme.colorScheme.onBackground
 
     Row(
-        modifier = modifier // ✅ apply passed modifier here
+        modifier = modifier
             .fillMaxWidth()
             .background(bgColor)
             .padding(vertical = 8.dp)
@@ -44,7 +42,7 @@ fun PlaylistTrackItem(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(start = 8.dp)
+                .padding(start = 8.dp, end = 8.dp)
         ) {
             Text(
                 text = highlightMatch(track.title, searchQuery, textColor),
@@ -55,14 +53,12 @@ fun PlaylistTrackItem(
                 style = MaterialTheme.typography.bodyMedium
             )
         }
-        IconButton(onClick = onPlay) {
-            Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = textColor)
-        }
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Default.Delete, contentDescription = "Delete")
-        }
-        TextButton(onClick = onAddToOtherPlaylist) {
-            Text("Add…")
+
+        IconButton(onClick = onMenuClick) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Track options"
+            )
         }
     }
 }

@@ -37,6 +37,7 @@ import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import com.aron.mediaplayer.viewmodel.PlaylistViewModel
 import kotlinx.coroutines.launch
 import com.aron.mediaplayer.ui.components.FastScroller
+import androidx.compose.foundation.clickable
 
 @UnstableApi
 @Composable
@@ -70,6 +71,7 @@ fun PlaylistDetailScreen(
     var showEditDialog by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showTrackOptionsSheet by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -246,10 +248,9 @@ fun PlaylistDetailScreen(
                             }
                             ContextCompat.startForegroundService(context, intent)
                         },
-                        onDelete = { viewModel.removeTrack(track) },
-                        onAddToOtherPlaylist = {
+                        onMenuClick = {
                             targetSong = track
-                            showPicker = true
+                            showTrackOptionsSheet = true
                         },
                         searchQuery = searchText,
                         modifier = Modifier.animateItemPlacement()
@@ -264,6 +265,36 @@ fun PlaylistDetailScreen(
                     .align(Alignment.CenterEnd)
                     .padding(end = 4.dp)
             )
+        }
+    }
+
+    if (showTrackOptionsSheet && targetSong != null) {
+        ModalBottomSheet(
+            onDismissRequest = { showTrackOptionsSheet = false }
+        ) {
+            ListItem(
+                headlineContent = { Text("Remove from this playlist") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        viewModel.removeTrack(targetSong!!)
+                        showTrackOptionsSheet = false
+                    }
+                    .padding(vertical = 12.dp)
+            )
+
+            ListItem(
+                headlineContent = { Text("Add to another playlist") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        showTrackOptionsSheet = false
+                        showPicker = true
+                    }
+                    .padding(vertical = 12.dp)
+            )
+
+            Spacer(Modifier.height(12.dp))
         }
     }
 

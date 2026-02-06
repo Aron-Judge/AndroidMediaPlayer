@@ -79,7 +79,6 @@ class PlaybackService : MediaSessionService() {
         @Volatile
         private var serviceInstance: PlaybackService? = null
 
-        // 🔹 Public accessor for the player
         val player: ExoPlayer?
             get() = serviceInstance?.player
 
@@ -118,19 +117,6 @@ class PlaybackService : MediaSessionService() {
                 player.seekToNextMediaItem()
                 player.play()
             }
-        }
-    }
-
-    // 🔹 Restored helper
-    private fun maybeUpdateNotification() {
-        if (Build.VERSION.SDK_INT < 33 ||
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(NOTIFICATION_ID, buildNotification())
         }
     }
 
@@ -178,6 +164,67 @@ class PlaybackService : MediaSessionService() {
         return mediaSession
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+
+        // 🔥 MUST be unconditional — fixes your crash
+        startForeground(NOTIFICATION_ID, buildLoadingNotification())
+
+        when (intent?.action) {
+
+            ACTION_ADD_TO_PLAYLIST -> {
+                serviceScope.launch(Dispatchers.IO) {
+                    val pid = activeStore.ensureDefaultPlaylistSelected()
+                    dao.insertTrack(
+                        PlaylistTrack(
+                            playlistId = pid,
+                            uri = intent.getStringExtra(EXTRA_URI) ?: return@launch,
+                            title = intent.getStringExtra(EXTRA_TITLE) ?: "Unknown Title",
+                            artist = intent.getStringExtra(EXTRA_ARTIST) ?: "Unknown Artist",
+                            duration = intent.getLongExtra(EXTRA_DURATION, 0L),
+                            artworkUri = intent.getStringExtra(EXTRA_ARTWORK_URI)
+                        )
+                    )
+                }
+            }
+
+            ACTION_PLAY -> {
+                val uri = intent.getStringExtra(EXTRA_URI)
+                val pidFromIntent = intent.getLongExtra(EXTRA_PLAYLIST_ID, -1L)
+
+                if (uri != null) {
+                    serviceScope.launch {
+                        val pid = if (pidFromIntent > 0) pidFromIntent
+                        else activeStore.ensureDefaultPlaylistSelected()
+
+                        val playlistTracks = dao.getTracksForPlaylist(pid).first()
+                        val indexInPlaylist = playlistTracks.indexOfFirst { it.uri == uri }
+
+                        if (indexInPlaylist >= 0) {
+                            if (activeStore.activePlaylistId.first() != pid) {
+                                activeStore.setActivePlaylistId(pid)
+                            }
+                            loadPlaylistIntoPlayer(playlistTracks, indexInPlaylist, 0, true)
+                        } else {
+                            getSongFromMediaStore(uri)?.let { track ->
+                                _currentSong.value = track
+                                _currentUri.value = track.uri
+                                loadPlaylistIntoPlayer(listOf(track), 0, 0, true)
+                            }
+                        }
+                    }
+                } else {
+                    player.play()
+                }
+            }
+
+            ACTION_PAUSE -> player.pause()
+            ACTION_NEXT -> player.seekToNextMediaItem()
+            ACTION_PREVIOUS -> handlePrevious()
+        }
+
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     private fun savePlaybackState() {
         val pid = runBlocking { activeStore.activePlaylistId.first() }
         prefs.edit()
@@ -198,75 +245,15 @@ class PlaybackService : MediaSessionService() {
             serviceScope.launch {
                 val tracks = dao.getTracksForPlaylist(pid).first()
                 if (tracks.isNotEmpty()) {
-                    loadPlaylistIntoPlayer(tracks, index.coerceIn(tracks.indices), pos, wasPlaying)
-                }
-            }
-        }
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_ADD_TO_PLAYLIST) {
-            runBlocking {
-                val pid = activeStore.ensureDefaultPlaylistSelected()
-                dao.insertTrack(
-                    PlaylistTrack(
-                        playlistId = pid,
-                        uri = intent.getStringExtra(EXTRA_URI) ?: return@runBlocking,
-                        title = intent.getStringExtra(EXTRA_TITLE) ?: "Unknown Title",
-                        artist = intent.getStringExtra(EXTRA_ARTIST) ?: "Unknown Artist",
-                        duration = intent.getLongExtra(EXTRA_DURATION, 0L),
-                        artworkUri = intent.getStringExtra(EXTRA_ARTWORK_URI)
+                    loadPlaylistIntoPlayer(
+                        tracks,
+                        index.coerceIn(tracks.indices),
+                        pos,
+                        wasPlaying
                     )
-                )
-            }
-        }
-
-        when (intent?.action) {
-            ACTION_PLAY -> {
-                val uri = intent.getStringExtra(EXTRA_URI)
-                val pidFromIntent = intent.getLongExtra(EXTRA_PLAYLIST_ID, -1L)
-
-                if (uri != null) {
-                    val pid = if (pidFromIntent > 0) pidFromIntent
-                    else runBlocking { activeStore.ensureDefaultPlaylistSelected() }
-
-                    val playlistTracks = runBlocking { dao.getTracksForPlaylist(pid).first() }
-                    val indexInPlaylist = playlistTracks.indexOfFirst { it.uri == uri }
-
-                    if (indexInPlaylist >= 0) {
-                        serviceScope.launch {
-                            val current = activeStore.activePlaylistId.first()
-                            if (current != pid) {
-                                activeStore.setActivePlaylistId(pid)
-                            }
-                        }
-                        loadPlaylistIntoPlayer(playlistTracks, indexInPlaylist, 0, true)
-                    } else {
-                        getSongFromMediaStore(uri)?.let { track ->
-                            _currentSong.value = track
-                            _currentUri.value = track.uri
-                            loadPlaylistIntoPlayer(listOf(track), 0, 0, true)
-                        }
-                    }
-                } else {
-                    player.play()
                 }
             }
-            ACTION_PAUSE -> player.pause()
-            ACTION_NEXT -> player.seekToNextMediaItem()
-            ACTION_PREVIOUS -> handlePrevious()
         }
-
-        if (Build.VERSION.SDK_INT < 33 ||
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            startForeground(NOTIFICATION_ID, buildLoadingNotification())
-        }
-
-        return super.onStartCommand(intent, flags, startId)
     }
 
     private fun getSongFromMediaStore(uri: String): PlaylistTrack? {
@@ -278,15 +265,12 @@ class PlaybackService : MediaSessionService() {
         val contentUri = Uri.parse(uri)
         contentResolver.query(contentUri, projection, null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) {
-                val title = cursor.getString(0) ?: "Unknown Title"
-                val artist = cursor.getString(1) ?: "Unknown Artist"
-                val duration = cursor.getLong(2)
                 return PlaylistTrack(
                     playlistId = -1,
                     uri = uri,
-                    title = title,
-                    artist = artist,
-                    duration = duration,
+                    title = cursor.getString(0) ?: "Unknown Title",
+                    artist = cursor.getString(1) ?: "Unknown Artist",
+                    duration = cursor.getLong(2),
                     artworkUri = null
                 )
             }
@@ -359,17 +343,7 @@ class PlaybackService : MediaSessionService() {
         val sameItemIndex = oldId?.let { id -> newItems.indexOfFirst { it.mediaId == id } } ?: -1
         if (sameItemIndex >= 0) {
             player.seekTo(sameItemIndex, oldPos)
-            _currentUri.value = newItems[sameItemIndex].localConfiguration?.uri.toString()
-            val mm = newItems[sameItemIndex].mediaMetadata
-            _currentSong.value = PlaylistTrack(
-                id = newItems[sameItemIndex].mediaId.toLongOrNull() ?: 0L,
-                playlistId = tracks.getOrNull(sameItemIndex)?.playlistId ?: -1,
-                uri = _currentUri.value ?: "",
-                title = mm.title?.toString() ?: "Unknown Title",
-                artist = mm.artist?.toString() ?: "Unknown Artist",
-                duration = tracks.getOrNull(sameItemIndex)?.duration ?: 0L,
-                artworkUri = mm.artworkUri?.toString()
-            )
+            updateCurrentSong(newItems, tracks, sameItemIndex)
             if (wasPlaying) player.play()
             return
         }
@@ -384,20 +358,27 @@ class PlaybackService : MediaSessionService() {
         }
 
         player.seekTo(targetIndex, 0L)
-        _currentUri.value = newItems[targetIndex].localConfiguration?.uri.toString()
+        updateCurrentSong(newItems, tracks, targetIndex)
 
-        val mm = newItems[targetIndex].mediaMetadata
+        if (wasPlaying) player.play()
+    }
+
+    private fun updateCurrentSong(
+        items: List<MediaItem>,
+        tracks: List<PlaylistTrack>,
+        index: Int
+    ) {
+        _currentUri.value = items[index].localConfiguration?.uri.toString()
+        val mm = items[index].mediaMetadata
         _currentSong.value = PlaylistTrack(
-            id = newItems[targetIndex].mediaId.toLongOrNull() ?: 0L,
-            playlistId = tracks.getOrNull(targetIndex)?.playlistId ?: -1,
+            id = items[index].mediaId.toLongOrNull() ?: 0L,
+            playlistId = tracks.getOrNull(index)?.playlistId ?: -1,
             uri = _currentUri.value ?: "",
             title = mm.title?.toString() ?: "Unknown Title",
             artist = mm.artist?.toString() ?: "Unknown Artist",
-            duration = tracks.getOrNull(targetIndex)?.duration ?: 0L,
+            duration = tracks.getOrNull(index)?.duration ?: 0L,
             artworkUri = mm.artworkUri?.toString()
         )
-
-        if (wasPlaying) player.play()
     }
 
     private fun handlePrevious() {
@@ -443,18 +424,13 @@ class PlaybackService : MediaSessionService() {
             .addAction(
                 if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
                 if (player.isPlaying) "Pause" else "Play",
-                if (player.isPlaying)
-                    PendingIntent.getService(
-                        this, 0,
-                        Intent(this, PlaybackService::class.java).setAction(ACTION_PAUSE),
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-                else
-                    PendingIntent.getService(
-                        this, 0,
-                        Intent(this, PlaybackService::class.java).setAction(ACTION_PLAY),
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
+                PendingIntent.getService(
+                    this, 0,
+                    Intent(this, PlaybackService::class.java).setAction(
+                        if (player.isPlaying) ACTION_PAUSE else ACTION_PLAY
+                    ),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
             )
             .addAction(
                 android.R.drawable.ic_media_next, "Next",
@@ -496,6 +472,18 @@ class PlaybackService : MediaSessionService() {
         }
 
         return builder.build()
+    }
+
+    private fun maybeUpdateNotification() {
+        if (Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, buildNotification())
+        }
     }
 
     private fun createNotificationChannel() {

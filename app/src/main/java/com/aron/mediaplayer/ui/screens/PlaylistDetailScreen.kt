@@ -246,7 +246,7 @@ fun PlaylistDetailScreen(
                                 putExtra(PlaybackService.EXTRA_URI, track.uri)
                                 putExtra(PlaybackService.EXTRA_PLAYLIST_ID, playlistId)
                             }
-                            ContextCompat.startForegroundService(context, intent)
+                            context.startService(intent)
                         },
                         onMenuClick = {
                             targetSong = track

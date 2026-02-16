@@ -2,7 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     id("org.jetbrains.kotlin.kapt")
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
+    // Match Kotlin version from your version catalog
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
 }
 
 android {
@@ -42,20 +43,21 @@ android {
 }
 
 dependencies {
-    // Compose BOM
+    // Compose BOM (update to latest via Android Studio suggestion)
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
 
     // Core Compose
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.media:media:1.7.0")
 
     // Activity & lifecycle integration for Compose
     implementation("androidx.activity:activity-compose")
     implementation("androidx.lifecycle:lifecycle-runtime-compose")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx")
 
-    // Optional: ViewModel + Compose integration for Step 6
+    // ViewModel + Compose integration
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose")
 
     // Debug tooling
@@ -67,15 +69,15 @@ dependencies {
     kapt("androidx.room:room-compiler:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
 
-    // Coroutines for background DB calls
+    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // Media playback
-    implementation("androidx.media:media:1.7.0")
-    implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-ui:1.4.1")
-    implementation("androidx.media3:media3-session:1.4.1")
+    // Media playback (updated + cleaned)
+    // REMOVE: implementation("androidx.media:media:1.7.0")
+    implementation("androidx.media3:media3-exoplayer:1.9.2") // Update to latest via AS
+    implementation("androidx.media3:media3-ui:1.9.2")
+    implementation("androidx.media3:media3-session:1.9.2")
 
     // Image loading
     implementation("com.github.bumptech.glide:glide:4.16.0")
@@ -93,5 +95,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
+    // DataStore
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 }

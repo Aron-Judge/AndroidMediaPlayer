@@ -1,4 +1,5 @@
 @file:OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.aron.mediaplayer.service
 
 import android.Manifest
@@ -29,6 +30,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import androidx.media.app.NotificationCompat as MediaStyleCompat
+import android.support.v4.media.session.MediaSessionCompat
 
 class PlaybackService : MediaSessionService() {
 
@@ -36,6 +39,10 @@ class PlaybackService : MediaSessionService() {
         private set
 
     private var mediaSession: MediaSession? = null
+
+    // ⭐ REQUIRED: compat session for MediaStyle
+    private var mediaSessionCompat: MediaSessionCompat? = null
+
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(serviceJob + Dispatchers.Main.immediate)
 
@@ -44,14 +51,16 @@ class PlaybackService : MediaSessionService() {
     private lateinit var activeStore: ActivePlaylistStore
     private lateinit var prefs: SharedPreferences
 
+    private var isForeground = false
+
     companion object {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "playback_channel"
 
         const val ACTION_PLAY = "com.aron.mediaplayer.PLAY"
-        private const val ACTION_PAUSE = "com.aron.mediaplayer.PAUSE"
-        private const val ACTION_NEXT = "com.aron.mediaplayer.NEXT"
-        private const val ACTION_PREVIOUS = "com.aron.mediaplayer.PREVIOUS"
+        const val ACTION_PAUSE = "com.aron.mediaplayer.PAUSE"
+        const val ACTION_NEXT = "com.aron.mediaplayer.NEXT"
+        const val ACTION_PREVIOUS = "com.aron.mediaplayer.PREVIOUS"
 
         const val ACTION_ADD_TO_PLAYLIST = "com.aron.mediaplayer.ADD_TO_PLAYLIST"
         const val EXTRA_URI = "mediaUri"
@@ -81,15 +90,12 @@ class PlaybackService : MediaSessionService() {
 
         val player: ExoPlayer?
             get() = serviceInstance?.player
-
-        fun togglePlayPause() {
-            player?.let { if (it.isPlaying) it.pause() else it.play() }
-        }
     }
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
+            handleForegroundState(isPlaying)
             maybeUpdateNotification()
             savePlaybackState()
         }
@@ -129,7 +135,13 @@ class PlaybackService : MediaSessionService() {
             addListener(playerListener)
             repeatMode = Player.REPEAT_MODE_ALL
         }
+
         mediaSession = MediaSession.Builder(this, player).build()
+
+        // ⭐ REQUIRED: compat session for MediaStyle
+        mediaSessionCompat = MediaSessionCompat(this, "PlaybackService").apply {
+            isActive = true
+        }
 
         createNotificationChannel()
 
@@ -155,6 +167,11 @@ class PlaybackService : MediaSessionService() {
         serviceJob.cancel()
         player.removeListener(playerListener)
         mediaSession?.release()
+
+        // ⭐ REQUIRED
+        mediaSessionCompat?.release()
+        mediaSessionCompat = null
+
         player.release()
         serviceInstance = null
         super.onDestroy()
@@ -165,12 +182,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-
-        // 🔥 MUST be unconditional — fixes your crash
-        startForeground(NOTIFICATION_ID, buildLoadingNotification())
-
         when (intent?.action) {
-
             ACTION_ADD_TO_PLAYLIST -> {
                 serviceScope.launch(Dispatchers.IO) {
                     val pid = activeStore.ensureDefaultPlaylistSelected()
@@ -223,6 +235,26 @@ class PlaybackService : MediaSessionService() {
         }
 
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    private fun handleForegroundState(isPlaying: Boolean) {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+
+        if (isPlaying) {
+            val notification = buildNotification()
+            if (!isForeground) {
+                startForeground(NOTIFICATION_ID, notification)
+                isForeground = true
+            } else {
+                nm.notify(NOTIFICATION_ID, notification)
+            }
+        } else {
+            if (isForeground) {
+                stopForeground(false)
+                nm.notify(NOTIFICATION_ID, buildNotification())
+                isForeground = false
+            }
+        }
     }
 
     private fun savePlaybackState() {
@@ -411,7 +443,7 @@ class PlaybackService : MediaSessionService() {
             .setContentTitle(title)
             .setContentText(artist)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setOngoing(true)
+            .setOngoing(player.isPlaying)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .addAction(
                 android.R.drawable.ic_media_previous, "Previous",
@@ -425,7 +457,7 @@ class PlaybackService : MediaSessionService() {
                 if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
                 if (player.isPlaying) "Pause" else "Play",
                 PendingIntent.getService(
-                    this, 0,
+                    this, 1,
                     Intent(this, PlaybackService::class.java).setAction(
                         if (player.isPlaying) ACTION_PAUSE else ACTION_PLAY
                     ),
@@ -435,14 +467,14 @@ class PlaybackService : MediaSessionService() {
             .addAction(
                 android.R.drawable.ic_media_next, "Next",
                 PendingIntent.getService(
-                    this, 0,
+                    this, 2,
                     Intent(this, PlaybackService::class.java).setAction(ACTION_NEXT),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
             )
             .setStyle(
-                androidx.media.app.NotificationCompat.MediaStyle()
-                    .setMediaSession(mediaSession?.sessionCompatToken)
+                MediaStyleCompat.MediaStyle()
+                    .setMediaSession(mediaSessionCompat?.sessionToken)   // ⭐ REQUIRED FIX
                     .setShowActionsInCompactView(0, 1, 2)
             )
 
@@ -491,7 +523,7 @@ class PlaybackService : MediaSessionService() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Playback",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_HIGH
             )
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)

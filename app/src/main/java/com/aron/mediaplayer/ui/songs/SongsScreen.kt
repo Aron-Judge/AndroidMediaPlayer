@@ -90,7 +90,7 @@ fun SongsScreen(
                                     action = PlaybackService.ACTION_PLAY
                                     putExtra(PlaybackService.EXTRA_URI, song.contentUri.toString())
                                 }
-                                ContextCompat.startForegroundService(context, intent)
+                                context.startService(intent)
                             },
                             onAddToPlaylist = { showPickerForSong = song }
                         )

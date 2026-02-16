@@ -31,7 +31,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import androidx.media.app.NotificationCompat as MediaStyleCompat
+import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 
 class PlaybackService : MediaSessionService() {
 
@@ -39,8 +41,6 @@ class PlaybackService : MediaSessionService() {
         private set
 
     private var mediaSession: MediaSession? = null
-
-    // ⭐ REQUIRED: compat session for MediaStyle
     private var mediaSessionCompat: MediaSessionCompat? = null
 
     private val serviceJob = SupervisorJob()
@@ -92,10 +92,33 @@ class PlaybackService : MediaSessionService() {
             get() = serviceInstance?.player
     }
 
+    private val mediaSessionCallback = object : MediaSessionCompat.Callback() {
+        override fun onPlay() {
+            player.play()
+        }
+
+        override fun onPause() {
+            player.pause()
+        }
+
+        override fun onSkipToNext() {
+            player.seekToNextMediaItem()
+        }
+
+        override fun onSkipToPrevious() {
+            player.seekToPreviousMediaItem()
+        }
+
+        override fun onSeekTo(pos: Long) {
+            player.seekTo(pos)
+        }
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
             handleForegroundState(isPlaying)
+            updateMediaSessionState(isPlaying, player.currentPosition, player.duration)
             maybeUpdateNotification()
             savePlaybackState()
         }
@@ -114,6 +137,7 @@ class PlaybackService : MediaSessionService() {
                     artworkUri = mm.artworkUri?.toString()
                 )
             }
+            updateMediaSessionState(player.isPlaying, player.currentPosition, player.duration)
             maybeUpdateNotification()
             savePlaybackState()
         }
@@ -138,8 +162,8 @@ class PlaybackService : MediaSessionService() {
 
         mediaSession = MediaSession.Builder(this, player).build()
 
-        // ⭐ REQUIRED: compat session for MediaStyle
         mediaSessionCompat = MediaSessionCompat(this, "PlaybackService").apply {
+            setCallback(mediaSessionCallback)
             isActive = true
         }
 
@@ -167,11 +191,8 @@ class PlaybackService : MediaSessionService() {
         serviceJob.cancel()
         player.removeListener(playerListener)
         mediaSession?.release()
-
-        // ⭐ REQUIRED
         mediaSessionCompat?.release()
         mediaSessionCompat = null
-
         player.release()
         serviceInstance = null
         super.onDestroy()
@@ -439,6 +460,8 @@ class PlaybackService : MediaSessionService() {
         val artUri: Uri = mm?.artworkUri
             ?: Uri.parse("https://via.placeholder.com/300.png?text=No+Artwork")
 
+        updateMediaSessionMetadata(title, artist, artworkCache[artUri])
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(artist)
@@ -474,11 +497,12 @@ class PlaybackService : MediaSessionService() {
             )
             .setStyle(
                 MediaStyleCompat.MediaStyle()
-                    .setMediaSession(mediaSessionCompat?.sessionToken)   // ⭐ REQUIRED FIX
+                    .setMediaSession(mediaSessionCompat?.sessionToken)
                     .setShowActionsInCompactView(0, 1, 2)
             )
 
         artworkCache[artUri]?.let { cachedBmp ->
+            updateMediaSessionMetadata(title, artist, cachedBmp)
             return builder.setLargeIcon(cachedBmp).build()
         }
 
@@ -491,6 +515,7 @@ class PlaybackService : MediaSessionService() {
                     .get()
                 artworkCache[artUri] = bmp
                 withContext(Dispatchers.Main) {
+                    updateMediaSessionMetadata(title, artist, bmp)
                     val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
                     nm.notify(NOTIFICATION_ID, builder.setLargeIcon(bmp).build())
                 }
@@ -528,5 +553,41 @@ class PlaybackService : MediaSessionService() {
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)
         }
+    }
+
+    private fun updateMediaSessionMetadata(title: String, artist: String, art: Bitmap?) {
+        val duration = player.duration.takeIf { it > 0 } ?: 0L
+
+        val metadata = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
+            .apply {
+                if (art != null) {
+                    putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art)
+                }
+            }
+            .build()
+        mediaSessionCompat?.setMetadata(metadata)
+    }
+
+    private fun updateMediaSessionState(isPlaying: Boolean, position: Long, duration: Long) {
+        val state = PlaybackStateCompat.Builder()
+            .setActions(
+                PlaybackStateCompat.ACTION_PLAY or
+                        PlaybackStateCompat.ACTION_PAUSE or
+                        PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                        PlaybackStateCompat.ACTION_SEEK_TO
+            )
+            .setState(
+                if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
+                position,
+                1.0f
+            )
+            .setBufferedPosition(duration)
+            .build()
+        mediaSessionCompat?.setPlaybackState(state)
     }
 }

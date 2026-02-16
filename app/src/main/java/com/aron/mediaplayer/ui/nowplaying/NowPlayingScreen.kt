@@ -90,26 +90,49 @@ fun NowPlayingScreen(
                 }
             }
 
-            // Progress bar + time labels
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Slider(
-                    value = if (duration > 0) position.toFloat() / duration.toFloat() else 0f,
-                    onValueChange = { fraction ->
-                        val newPos = (fraction * duration).toLong()
-                        viewModel.seekTo(newPos)
-                    },
-                    modifier = Modifier.padding(horizontal = 32.dp)
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(formatTime(position))
-                    Text(formatTime(duration))
-                }
-            }
+            // ⭐ NEW SCRUBBER (Spotify‑style)
+            Scrubber(
+                position = position,
+                duration = duration,
+                onSeek = { viewModel.seekTo(it) }
+            )
+        }
+    }
+}
+
+@Composable
+fun Scrubber(
+    position: Long,
+    duration: Long,
+    onSeek: (Long) -> Unit
+) {
+    var isDragging by remember { mutableStateOf(false) }
+    var dragPosition by remember { mutableStateOf(position.toFloat()) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+
+        Slider(
+            value = if (isDragging) dragPosition else position.toFloat(),
+            onValueChange = {
+                isDragging = true
+                dragPosition = it
+            },
+            onValueChangeFinished = {
+                onSeek(dragPosition.toLong())
+                isDragging = false
+            },
+            valueRange = 0f..duration.toFloat(),
+            modifier = Modifier.padding(horizontal = 32.dp)
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(formatTime(position))
+            Text(formatTime(duration))
         }
     }
 }

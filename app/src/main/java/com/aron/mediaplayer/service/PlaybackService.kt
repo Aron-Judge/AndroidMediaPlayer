@@ -53,6 +53,13 @@ class PlaybackService : MediaSessionService() {
 
     private var isForeground = false
 
+    // ⭐ SCRUBBER FLOWS
+    private val _position = MutableStateFlow(0L)
+    val position: StateFlow<Long> = _position
+
+    private val _duration = MutableStateFlow(0L)
+    val duration: StateFlow<Long> = _duration
+
     companion object {
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "playback_channel"
@@ -92,26 +99,13 @@ class PlaybackService : MediaSessionService() {
             get() = serviceInstance?.player
     }
 
+    // ⭐ MEDIA SESSION CALLBACK (enables scrubber + buttons)
     private val mediaSessionCallback = object : MediaSessionCompat.Callback() {
-        override fun onPlay() {
-            player.play()
-        }
-
-        override fun onPause() {
-            player.pause()
-        }
-
-        override fun onSkipToNext() {
-            player.seekToNextMediaItem()
-        }
-
-        override fun onSkipToPrevious() {
-            player.seekToPreviousMediaItem()
-        }
-
-        override fun onSeekTo(pos: Long) {
-            player.seekTo(pos)
-        }
+        override fun onPlay() = player.play()
+        override fun onPause() = player.pause()
+        override fun onSkipToNext() = player.seekToNextMediaItem()
+        override fun onSkipToPrevious() = player.seekToPreviousMediaItem()
+        override fun onSeekTo(pos: Long) = player.seekTo(pos)
     }
 
     private val playerListener = object : Player.Listener {
@@ -141,13 +135,6 @@ class PlaybackService : MediaSessionService() {
             maybeUpdateNotification()
             savePlaybackState()
         }
-
-        override fun onPlaybackStateChanged(state: Int) {
-            if (state == Player.STATE_ENDED && player.hasNextMediaItem()) {
-                player.seekToNextMediaItem()
-                player.play()
-            }
-        }
     }
 
     override fun onCreate() {
@@ -171,6 +158,15 @@ class PlaybackService : MediaSessionService() {
 
         dao = AppDatabase.getInstance(applicationContext).playlistDao()
         activeStore = ActivePlaylistStore(applicationContext, dao)
+
+        // ⭐ SCRUBBER UPDATE LOOP
+        serviceScope.launch {
+            while (isActive) {
+                _position.value = player.currentPosition
+                _duration.value = player.duration.takeIf { it > 0 } ?: 0L
+                delay(200)
+            }
+        }
 
         playlistJob = serviceScope.launch {
             val initialId = activeStore.ensureDefaultPlaylistSelected()
@@ -198,28 +194,11 @@ class PlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        return mediaSession
-    }
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+        mediaSession
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_ADD_TO_PLAYLIST -> {
-                serviceScope.launch(Dispatchers.IO) {
-                    val pid = activeStore.ensureDefaultPlaylistSelected()
-                    dao.insertTrack(
-                        PlaylistTrack(
-                            playlistId = pid,
-                            uri = intent.getStringExtra(EXTRA_URI) ?: return@launch,
-                            title = intent.getStringExtra(EXTRA_TITLE) ?: "Unknown Title",
-                            artist = intent.getStringExtra(EXTRA_ARTIST) ?: "Unknown Artist",
-                            duration = intent.getLongExtra(EXTRA_DURATION, 0L),
-                            artworkUri = intent.getStringExtra(EXTRA_ARTWORK_URI)
-                        )
-                    )
-                }
-            }
-
             ACTION_PLAY -> {
                 val uri = intent.getStringExtra(EXTRA_URI)
                 val pidFromIntent = intent.getLongExtra(EXTRA_PLAYLIST_ID, -1L)
@@ -245,9 +224,7 @@ class PlaybackService : MediaSessionService() {
                             }
                         }
                     }
-                } else {
-                    player.play()
-                }
+                } else player.play()
             }
 
             ACTION_PAUSE -> player.pause()
@@ -260,19 +237,17 @@ class PlaybackService : MediaSessionService() {
 
     private fun handleForegroundState(isPlaying: Boolean) {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        val notification = buildNotification()
 
         if (isPlaying) {
-            val notification = buildNotification()
             if (!isForeground) {
                 startForeground(NOTIFICATION_ID, notification)
                 isForeground = true
-            } else {
-                nm.notify(NOTIFICATION_ID, notification)
-            }
+            } else nm.notify(NOTIFICATION_ID, notification)
         } else {
             if (isForeground) {
                 stopForeground(false)
-                nm.notify(NOTIFICATION_ID, buildNotification())
+                nm.notify(NOTIFICATION_ID, notification)
                 isForeground = false
             }
         }
@@ -435,11 +410,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun handlePrevious() {
-        if (player.currentPosition > 3000) {
-            player.seekTo(0)
-        } else {
-            player.seekToPreviousMediaItem()
-        }
+        if (player.currentPosition > 3000) player.seekTo(0)
+        else player.seekToPreviousMediaItem()
     }
 
     private fun buildLoadingNotification(): Notification =
@@ -568,6 +540,7 @@ class PlaybackService : MediaSessionService() {
                 }
             }
             .build()
+
         mediaSessionCompat?.setMetadata(metadata)
     }
 
@@ -582,12 +555,14 @@ class PlaybackService : MediaSessionService() {
                         PlaybackStateCompat.ACTION_SEEK_TO
             )
             .setState(
-                if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
+                if (isPlaying) PlaybackStateCompat.STATE_PLAYING
+                else PlaybackStateCompat.STATE_PAUSED,
                 position,
                 1.0f
             )
             .setBufferedPosition(duration)
             .build()
+
         mediaSessionCompat?.setPlaybackState(state)
     }
 }

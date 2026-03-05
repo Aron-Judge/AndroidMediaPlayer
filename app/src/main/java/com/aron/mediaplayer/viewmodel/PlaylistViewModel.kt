@@ -8,18 +8,20 @@ import com.aron.mediaplayer.data.PlaylistDao
 import com.aron.mediaplayer.data.PlaylistEntity
 import com.aron.mediaplayer.data.PlaylistTrack
 import com.aron.mediaplayer.data.PlaylistWithCount
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class PlaylistViewModel(private val dao: PlaylistDao) : ViewModel() {
 
-    // ✅ Search query state for live filtering
+    // Search query state for live filtering
     private val searchQuery = MutableStateFlow("")
     fun setSearchQuery(query: String) {
         searchQuery.value = query
     }
     fun getSearchQuery(): StateFlow<String> = searchQuery.asStateFlow()
 
+    // Playlist list
     val playlists: StateFlow<List<PlaylistEntity>> =
         dao.getAllPlaylists()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -28,28 +30,45 @@ class PlaylistViewModel(private val dao: PlaylistDao) : ViewModel() {
         dao.getPlaylistsWithCount()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Existing: unfiltered playlist tracks
+    // Single playlist metadata (name, description, cover)
+    private val _playlist = MutableStateFlow<PlaylistEntity?>(null)
+    val playlist: StateFlow<PlaylistEntity?> = _playlist.asStateFlow()
+
+    fun loadPlaylist(playlistId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _playlist.value = dao.getPlaylistById(playlistId)
+        }
+    }
+
+    // Cache of live track flows per playlist to avoid recreating flows on recomposition
+    private val trackFlows =
+        mutableMapOf<Long, StateFlow<List<PlaylistTrack>>>()
+
+    fun tracksForPlaylistLive(playlistId: Long): StateFlow<List<PlaylistTrack>> {
+        return trackFlows.getOrPut(playlistId) {
+            searchQuery
+                .debounce(150)
+                .map { it.trim() }
+                .distinctUntilChanged()
+                .flatMapLatest { q ->
+                    if (q.isEmpty()) {
+                        dao.getTracksForPlaylist(playlistId)
+                    } else {
+                        dao.searchTracksInPlaylist(playlistId, q)
+                    }
+                }
+                .stateIn(
+                    viewModelScope,
+                    SharingStarted.WhileSubscribed(5000),
+                    emptyList()
+                )
+        }
+    }
+
+    // Legacy unfiltered version if you still need it elsewhere
     fun getTracksForPlaylist(playlistId: Long): StateFlow<List<PlaylistTrack>> =
         dao.getTracksForPlaylist(playlistId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // ✅ New: live search version — matches title OR artist, updates as user types
-    fun getTracksForPlaylistLive(playlistId: Long): StateFlow<List<PlaylistTrack>> {
-        return searchQuery
-            .debounce(150) // smooth typing
-            .map { it.trim() }
-            .distinctUntilChanged()
-            .flatMapLatest { q ->
-                if (q.isEmpty()) {
-                    dao.getTracksForPlaylist(playlistId)
-                        .distinctUntilChanged()   // 👈 prevent redundant emissions
-                } else {
-                    dao.searchTracksInPlaylist(playlistId, q)
-                        .distinctUntilChanged()   // 👈 same here
-                }
-            }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    }
 
     fun addTrack(track: PlaylistTrack) = viewModelScope.launch { dao.insertTrack(track) }
     fun removeTrack(track: PlaylistTrack) = viewModelScope.launch { dao.deleteTrack(track) }

@@ -25,7 +25,6 @@ import coil.compose.AsyncImage
 import com.aron.mediaplayer.data.*
 import com.aron.mediaplayer.ui.components.CreatePlaylistDialog
 import com.aron.mediaplayer.ui.components.PlaylistManageDialogs
-import com.aron.mediaplayer.ui.components.NowPlayingBar
 import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 import com.aron.mediaplayer.util.importFolderAsPlaylist
 import kotlinx.coroutines.launch
@@ -57,135 +56,120 @@ fun PlaylistListScreen(
         }
     }
 
-    // 👇 Collect playback state
+    // Playback state (used only if you want to highlight something later)
     val nowPlayingViewModel: NowPlayingViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val isPlaying by nowPlayingViewModel.isPlaying.collectAsState()
     val currentSong by nowPlayingViewModel.currentSong.collectAsState()
 
-    Scaffold(
-        bottomBar = {
-            if (currentSong != null) {
-                NowPlayingBar(
-                    title = currentSong!!.title,
-                    artist = currentSong!!.artist,
-                    artworkUri = currentSong!!.artworkUri,
-                    isPlaying = isPlaying,
-                    onPlayPause = { nowPlayingViewModel.togglePlayPause() },
-                    onExpand = { /* TODO: navigate to full player */ }
-                )
-            }
-        }
-    ) { innerPadding ->
-        Box(modifier = Modifier
+    Box(
+        modifier = Modifier
             .fillMaxSize()
-            .padding(innerPadding)) {
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(playlists) { playlist ->
+                val entity by produceState<PlaylistEntity?>(initialValue = null, playlist.playlistId) {
+                    value = dao.playlistDao().getPlaylistById(playlist.playlistId)
+                }
+                val firstTrack by dao.playlistDao().getTracksForPlaylist(playlist.playlistId)
+                    .collectAsState(initial = emptyList<PlaylistTrack>())
 
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(playlists) { playlist ->
-                    val entity by produceState<PlaylistEntity?>(initialValue = null, playlist.playlistId) {
-                        value = dao.playlistDao().getPlaylistById(playlist.playlistId)
-                    }
-                    val firstTrack by dao.playlistDao().getTracksForPlaylist(playlist.playlistId)
-                        .collectAsState(initial = emptyList<PlaylistTrack>())
+                val cover = entity?.coverUri ?: firstTrack.firstOrNull()?.artworkUri
 
-                    val cover = entity?.coverUri ?: firstTrack.firstOrNull()?.artworkUri
-
-                    Card(
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPlaylistClick(playlist.playlistId) }
+                ) {
+                    Row(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onPlaylistClick(playlist.playlistId) }
+                            .padding(16.dp)
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(16.dp)
-                                .fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (!cover.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = cover,
-                                        contentDescription = "Playlist artwork",
-                                        modifier = Modifier
-                                            .size(56.dp)
-                                            .background(Color.DarkGray),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(56.dp)
-                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("♪", style = MaterialTheme.typography.titleLarge)
-                                    }
-                                }
-
-                                Spacer(Modifier.width(16.dp))
-
-                                Column {
-                                    Text(playlist.name, style = MaterialTheme.typography.titleMedium)
-                                    Text("${playlist.trackCount} songs", style = MaterialTheme.typography.bodyMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!cover.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = cover,
+                                    contentDescription = "Playlist artwork",
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .background(Color.DarkGray),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("♪", style = MaterialTheme.typography.titleLarge)
                                 }
                             }
 
-                            // Three-dot menu
-                            Box {
-                                IconButton(onClick = { menuExpandedFor = playlist.playlistId }) {
-                                    Icon(Icons.Filled.MoreVert, contentDescription = "More options")
-                                }
-                                DropdownMenu(
-                                    expanded = menuExpandedFor == playlist.playlistId,
-                                    onDismissRequest = { menuExpandedFor = null }
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Edit details") },
-                                        onClick = {
-                                            entity?.let { playlistToEdit = it }
-                                            menuExpandedFor = null
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Delete playlist") },
-                                        onClick = {
-                                            entity?.let { playlistToDelete = it }
-                                            menuExpandedFor = null
-                                        }
-                                    )
-                                }
+                            Spacer(Modifier.width(16.dp))
+
+                            Column {
+                                Text(playlist.name, style = MaterialTheme.typography.titleMedium)
+                                Text("${playlist.trackCount} songs", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+
+                        // Three-dot menu
+                        Box {
+                            IconButton(onClick = { menuExpandedFor = playlist.playlistId }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "More options")
+                            }
+                            DropdownMenu(
+                                expanded = menuExpandedFor == playlist.playlistId,
+                                onDismissRequest = { menuExpandedFor = null }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Edit details") },
+                                    onClick = {
+                                        entity?.let { playlistToEdit = it }
+                                        menuExpandedFor = null
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Delete playlist") },
+                                    onClick = {
+                                        entity?.let { playlistToDelete = it }
+                                        menuExpandedFor = null
+                                    }
+                                )
                             }
                         }
                     }
                 }
             }
+        }
 
-            // FABs
-            FloatingActionButton(
-                onClick = { showCreateDialog = true },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp),
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "New Playlist", tint = Color.White)
-            }
+        // FABs
+        FloatingActionButton(
+            onClick = { showCreateDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+            containerColor = MaterialTheme.colorScheme.primary
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = "New Playlist", tint = Color.White)
+        }
 
-            FloatingActionButton(
-                onClick = { folderPickerLauncher.launch(null) },
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(16.dp),
-                containerColor = MaterialTheme.colorScheme.secondary
-            ) {
-                Icon(Icons.Filled.Folder, contentDescription = "Import Folder", tint = Color.White)
-            }
+        FloatingActionButton(
+            onClick = { folderPickerLauncher.launch(null) },
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp),
+            containerColor = MaterialTheme.colorScheme.secondary
+        ) {
+            Icon(Icons.Filled.Folder, contentDescription = "Import Folder", tint = Color.White)
         }
     }
 

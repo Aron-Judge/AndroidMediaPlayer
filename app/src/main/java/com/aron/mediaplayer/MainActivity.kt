@@ -9,8 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
@@ -30,12 +29,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.size
 import androidx.compose.ui.layout.ContentScale
 import com.aron.mediaplayer.data.ActivePlaylistStore
 import com.aron.mediaplayer.data.AppDatabase
 import com.aron.mediaplayer.data.PlaylistEntity
 import com.aron.mediaplayer.ui.components.MissingCoversDialog
+import com.aron.mediaplayer.ui.components.NowPlayingBar
 import com.aron.mediaplayer.ui.nowplaying.NowPlayingScreen
 import com.aron.mediaplayer.ui.screens.PlaylistDetailScreen
 import com.aron.mediaplayer.ui.screens.PlaylistListScreen
@@ -111,14 +110,12 @@ fun MediaPlayerApp() {
         .getPlaylistsNeedingCover(context)
         .collectAsState(initial = emptyList())
 
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.Songs) }
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Playlists) }
     val scope = rememberCoroutineScope()
 
-    // Collect playback state for spinning disc
     val isPlaying by nowPlayingViewModel.isPlaying.collectAsState()
     val currentSong by nowPlayingViewModel.currentSong.collectAsState()
 
-    // Rotation animation
     val infiniteTransition = rememberInfiniteTransition(label = "discRotation")
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -132,15 +129,29 @@ fun MediaPlayerApp() {
 
     Scaffold(
         bottomBar = {
-            if (currentScreen is Screen.Songs || currentScreen is Screen.Playlists || currentScreen is Screen.NowPlaying) {
-                NavigationBar(containerColor = Color.Black, contentColor = Color.White) {
-                    NavigationBarItem(
-                        selected = currentScreen is Screen.Songs,
-                        onClick = { currentScreen = Screen.Songs },
-                        label = { Text("Songs") },
-                        icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Songs") }
+            Column {
+                if (currentSong != null) {
+                    NowPlayingBar(
+                        title = currentSong!!.title,
+                        artist = currentSong!!.artist,
+                        artworkUri = currentSong!!.artworkUri,
+                        isPlaying = isPlaying,
+                        onPlayPause = { nowPlayingViewModel.togglePlayPause() },
+                        onExpand = { currentScreen = Screen.NowPlaying }
                     )
-                    // Middle Now Playing button with spinning disc
+                }
+
+                NavigationBar(containerColor = Color.Black, contentColor = Color.White) {
+
+                    // Left: Playlists
+                    NavigationBarItem(
+                        selected = currentScreen is Screen.Playlists,
+                        onClick = { currentScreen = Screen.Playlists },
+                        label = { Text("Playlists") },
+                        icon = { Icon(Icons.Filled.PlaylistPlay, contentDescription = "Playlists") }
+                    )
+
+                    // Middle: Now Playing (spinning disc)
                     NavigationBarItem(
                         selected = currentScreen is Screen.NowPlaying,
                         onClick = { currentScreen = Screen.NowPlaying },
@@ -167,11 +178,13 @@ fun MediaPlayerApp() {
                             }
                         }
                     )
+
+                    // Right: Songs
                     NavigationBarItem(
-                        selected = currentScreen is Screen.Playlists,
-                        onClick = { currentScreen = Screen.Playlists },
-                        label = { Text("Playlists") },
-                        icon = { Icon(Icons.Filled.PlaylistPlay, contentDescription = "Playlists") }
+                        selected = currentScreen is Screen.Songs,
+                        onClick = { currentScreen = Screen.Songs },
+                        label = { Text("Songs") },
+                        icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Songs") }
                     )
                 }
             }
@@ -186,6 +199,7 @@ fun MediaPlayerApp() {
                     songs = songs,
                     onRequestPermission = requestPermission
                 )
+
                 Screen.Playlists -> PlaylistListScreen(
                     playlists = playlistsWithCount,
                     onPlaylistClick = { id -> currentScreen = Screen.PlaylistDetail(id) },
@@ -205,6 +219,7 @@ fun MediaPlayerApp() {
                         }
                     }
                 )
+
                 is Screen.PlaylistDetail -> {
                     val listState = rememberSaveable(screen.id, saver = LazyListState.Saver) {
                         LazyListState()
@@ -216,6 +231,7 @@ fun MediaPlayerApp() {
                         onBack = { currentScreen = Screen.Playlists }
                     )
                 }
+
                 Screen.NowPlaying -> {
                     NowPlayingScreen(
                         viewModel = nowPlayingViewModel,

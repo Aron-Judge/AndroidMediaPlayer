@@ -6,7 +6,9 @@
 ![Platform](https://img.shields.io/badge/Platform-Android-lightgrey?logo=android)
 ![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-red)
 
-A lightweight Kotlin-based Android media player designed to scan local audio files, manage playlists, and provide a clean, modern playback experience. Built with Jetpack Compose and tested on the Google Pixel 7a.
+A lightweight Kotlin-based Android media player designed to scan local audio files, manage playlists, and provide a clean, modern playback experience. Built with Jetpack Compose and tested on the Google Pixel 7a for complete offline listening.
+
+> **Note:** The app name and branding are temporary and will be updated once the final logo and identity are chosen.
 
 ---
 

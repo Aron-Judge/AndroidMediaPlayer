@@ -19,16 +19,26 @@ class NowPlayingViewModel : ViewModel() {
     val currentSong: StateFlow<PlaylistTrack?> = PlaybackServiceConnection.currentSong
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    // 🔹 Playback position and duration
+    // Playback position and duration
     val positionMs: StateFlow<Long> = PlaybackServiceConnection.positionMs
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
 
     val durationMs: StateFlow<Long> = PlaybackServiceConnection.durationMs
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
 
-    // Controls
+    // Queue
+    val queue: StateFlow<List<PlaylistTrack>> = PlaybackServiceConnection.queue
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // Playback controls
     fun togglePlayPause() = PlaybackServiceConnection.togglePlayPause()
     fun seekTo(position: Long) = PlaybackServiceConnection.seekTo(position)
     fun skipToNext() = PlaybackServiceConnection.skipToNext()
     fun skipToPrevious() = PlaybackServiceConnection.skipToPrevious()
+
+    // Queue controls
+    fun addToQueue(track: PlaylistTrack) = PlaybackServiceConnection.addToQueue(track)
+    fun playNext(track: PlaylistTrack) = PlaybackServiceConnection.playNext(track)
+    fun clearQueue() = PlaybackServiceConnection.clearQueue()
+    fun removeFromQueue(trackId: Long) = PlaybackServiceConnection.removeFromQueue(trackId)
 }

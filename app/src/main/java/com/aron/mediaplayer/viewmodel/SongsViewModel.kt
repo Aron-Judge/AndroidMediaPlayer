@@ -24,7 +24,7 @@ class SongsViewModel : ViewModel() {
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.ARTIST,
                 MediaStore.Audio.Media.DURATION,
-                MediaStore.Audio.Media.ALBUM_ID // for artwork (optional)
+                MediaStore.Audio.Media.ALBUM_ID // for artwork
             )
 
             val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"

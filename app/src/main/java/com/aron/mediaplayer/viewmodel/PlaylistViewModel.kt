@@ -65,7 +65,7 @@ class PlaylistViewModel(private val dao: PlaylistDao) : ViewModel() {
         }
     }
 
-    // Legacy unfiltered version if you still need it elsewhere
+    // Legacy unfiltered version
     fun getTracksForPlaylist(playlistId: Long): StateFlow<List<PlaylistTrack>> =
         dao.getTracksForPlaylist(playlistId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

@@ -27,7 +27,7 @@ fun CreatePlaylistDialog(
     var description by remember { mutableStateOf(TextFieldValue("")) }
     var coverUri by remember { mutableStateOf<String?>(null) }
 
-    // Use OpenDocument so we can persist URI permission
+
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->

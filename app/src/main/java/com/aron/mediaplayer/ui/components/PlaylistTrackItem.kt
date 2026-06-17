@@ -27,7 +27,9 @@ fun PlaylistTrackItem(
     track: PlaylistTrack,
     isPlaying: Boolean,
     onPlay: () -> Unit,
-    onMenuClick: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onMenuClick: () -> Unit = {},
     searchQuery: String = "",
     modifier: Modifier = Modifier
 ) {
@@ -43,7 +45,6 @@ fun PlaylistTrackItem(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Album art (Spotify-style)
         AsyncImage(
             model = track.artworkUri,
             contentDescription = "${track.title} artwork",

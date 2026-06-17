@@ -1,6 +1,8 @@
 package com.aron.mediaplayer.ui.nowplaying
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -12,6 +14,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.aron.mediaplayer.data.PlaylistTrack
 import com.aron.mediaplayer.viewmodel.NowPlayingViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -24,6 +27,7 @@ fun NowPlayingScreen(
     val isPlaying by viewModel.isPlaying.collectAsState()
     val position by viewModel.positionMs.collectAsState()
     val duration by viewModel.durationMs.collectAsState()
+    val queue by viewModel.queue.collectAsState()
 
     Scaffold(
         topBar = {
@@ -42,10 +46,10 @@ fun NowPlayingScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceEvenly
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Artwork
+            Spacer(Modifier.height(8.dp))
+
             if (!currentSong?.artworkUri.isNullOrBlank()) {
                 AsyncImage(
                     model = currentSong!!.artworkUri,
@@ -63,13 +67,21 @@ fun NowPlayingScreen(
                 )
             }
 
-            // Title + artist
+            Spacer(Modifier.height(16.dp))
+
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(currentSong?.title ?: "Unknown Title", style = MaterialTheme.typography.headlineSmall)
-                Text(currentSong?.artist ?: "Unknown Artist", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    currentSong?.title ?: "Unknown Title",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+                Text(
+                    currentSong?.artist ?: "Unknown Artist",
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
 
-            // Controls
+            Spacer(Modifier.height(16.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -90,12 +102,76 @@ fun NowPlayingScreen(
                 }
             }
 
-            // ⭐ NEW SCRUBBER (Spotify‑style)
+            Spacer(Modifier.height(8.dp))
+
             Scrubber(
                 position = position,
                 duration = duration,
                 onSeek = { viewModel.seekTo(it) }
             )
+
+            Spacer(Modifier.height(16.dp))
+
+            if (queue.isNotEmpty()) {
+                QueueSection(
+                    queue = queue,
+                    onClearQueue = { viewModel.clearQueue() }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueueSection(
+    queue: List<PlaylistTrack>,
+    onClearQueue: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Up Next",
+                style = MaterialTheme.typography.titleMedium
+            )
+            TextButton(onClick = onClearQueue) {
+                Text("Clear queue")
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 220.dp)
+        ) {
+            items(queue) { track ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Text(
+                        text = track.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = track.artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        maxLines = 1
+                    )
+                }
+            }
         }
     }
 }

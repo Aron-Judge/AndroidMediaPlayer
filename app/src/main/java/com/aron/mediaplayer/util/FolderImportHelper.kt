@@ -153,7 +153,7 @@ private suspend fun queryAndInsertFallback(
         projection,
         "${MediaStore.Audio.Media.IS_MUSIC} != 0",
         null,
-        null // no ORDER BY, we’ll sort ourselves
+        null // no ORDER BY
     )?.use { cursor ->
         val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
         val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)

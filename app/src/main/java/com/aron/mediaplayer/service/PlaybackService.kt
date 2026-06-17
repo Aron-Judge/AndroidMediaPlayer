@@ -21,14 +21,24 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.aron.mediaplayer.R
-import com.aron.mediaplayer.data.*
+import com.aron.mediaplayer.data.AppDatabase
+import com.aron.mediaplayer.data.ActivePlaylistStore
+import com.aron.mediaplayer.data.PlaylistDao
+import com.aron.mediaplayer.data.PlaylistTrack
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.Target
-import kotlinx.coroutines.*
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import androidx.media.app.NotificationCompat as MediaStyleCompat
 import android.support.v4.media.MediaMetadataCompat
@@ -53,12 +63,15 @@ class PlaybackService : MediaSessionService() {
 
     private var isForeground = false
 
-    // ⭐ SCRUBBER FLOWS
+    // Scrubber flows
     private val _position = MutableStateFlow(0L)
     val position: StateFlow<Long> = _position
 
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration
+
+    // Queue (in-memory, cleared on restart)
+    private val queueList = mutableListOf<PlaylistTrack>()
 
     companion object {
         private const val NOTIFICATION_ID = 1
@@ -92,14 +105,21 @@ class PlaybackService : MediaSessionService() {
         private val _currentSong = MutableStateFlow<PlaylistTrack?>(null)
         val currentSong: StateFlow<PlaylistTrack?> = _currentSong
 
+        // Queue state exposed to UI
+        private val _queue = MutableStateFlow<List<PlaylistTrack>>(emptyList())
+        val queue: StateFlow<List<PlaylistTrack>> = _queue
+
         @Volatile
         private var serviceInstance: PlaybackService? = null
 
         val player: ExoPlayer?
             get() = serviceInstance?.player
+
+        internal val instance: PlaybackService?
+            get() = serviceInstance
     }
 
-    // ⭐ MEDIA SESSION CALLBACK (enables scrubber + buttons)
+    // Media session callback
     private val mediaSessionCallback = object : MediaSessionCompat.Callback() {
         override fun onPlay() = player.play()
         override fun onPause() = player.pause()
@@ -131,6 +151,14 @@ class PlaybackService : MediaSessionService() {
                     artworkUri = mm.artworkUri?.toString()
                 )
             }
+
+            // If the new item is the head of the queue, pop it
+            val currentId = mediaItem?.mediaId?.toLongOrNull()
+            if (currentId != null && queueList.isNotEmpty() && queueList.first().id == currentId) {
+                queueList.removeAt(0)
+                _queue.value = queueList.toList()
+            }
+
             updateMediaSessionState(player.isPlaying, player.currentPosition, player.duration)
             maybeUpdateNotification()
             savePlaybackState()
@@ -159,7 +187,7 @@ class PlaybackService : MediaSessionService() {
         dao = AppDatabase.getInstance(applicationContext).playlistDao()
         activeStore = ActivePlaylistStore(applicationContext, dao)
 
-        // ⭐ SCRUBBER UPDATE LOOP
+        // Scrubber update loop
         serviceScope.launch {
             while (isActive) {
                 _position.value = player.currentPosition
@@ -350,14 +378,13 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun syncQueueWith(tracks: List<PlaylistTrack>) {
-        val newItems = buildMediaItems(tracks)
-        val wasPlaying = player.isPlaying
-        val oldItems = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
-        val oldIndex = player.currentMediaItemIndex
-        val oldId = player.currentMediaItem?.mediaId
-        val oldPos = player.currentPosition
+        val playlistItems = buildMediaItems(tracks)
 
-        if (newItems.isEmpty()) {
+        val wasPlaying = player.isPlaying
+        val oldMediaId = player.currentMediaItem?.mediaId
+        val oldPosition = player.currentPosition
+
+        if (playlistItems.isEmpty()) {
             player.setMediaItems(emptyList())
             player.pause()
             _currentUri.value = null
@@ -365,28 +392,30 @@ class PlaybackService : MediaSessionService() {
             return
         }
 
-        player.setMediaItems(newItems, false)
+        // Reset to playlist items only
+        player.setMediaItems(playlistItems, false)
         player.prepare()
 
-        val sameItemIndex = oldId?.let { id -> newItems.indexOfFirst { it.mediaId == id } } ?: -1
-        if (sameItemIndex >= 0) {
-            player.seekTo(sameItemIndex, oldPos)
-            updateCurrentSong(newItems, tracks, sameItemIndex)
-            if (wasPlaying) player.play()
-            return
+        // Base index: where the current item sits in the new playlist, or fallback to 0
+        val baseIndex = playlistItems.indexOfFirst { it.mediaId == oldMediaId }
+            .let { if (it >= 0) it else 0 }
+
+        // Reinsert queue items immediately after current item as a contiguous block
+        if (queueList.isNotEmpty()) {
+            val queueMediaItems = buildMediaItems(queueList)
+            queueMediaItems.forEachIndexed { offset, item ->
+                val insertIndex = (baseIndex + 1 + offset)
+                    .coerceIn(0, player.mediaItemCount)
+                player.addMediaItem(insertIndex, item)
+            }
         }
 
-        val oldNextId = oldItems.getOrNull(oldIndex + 1)?.mediaId
-        val nextIndex = oldNextId?.let { nx -> newItems.indexOfFirst { it.mediaId == nx } } ?: -1
+        // Restore playback to the same mediaId if possible
+        val newIndex = (0 until player.mediaItemCount)
+            .indexOfFirst { player.getMediaItemAt(it).mediaId == oldMediaId }
 
-        val targetIndex = when {
-            nextIndex >= 0 -> nextIndex
-            oldIndex <= newItems.lastIndex -> oldIndex
-            else -> newItems.lastIndex
-        }
-
-        player.seekTo(targetIndex, 0L)
-        updateCurrentSong(newItems, tracks, targetIndex)
+        val targetIndex = if (newIndex >= 0) newIndex else baseIndex
+        player.seekTo(targetIndex, oldPosition)
 
         if (wasPlaying) player.play()
     }
@@ -412,6 +441,59 @@ class PlaybackService : MediaSessionService() {
     private fun handlePrevious() {
         if (player.currentPosition > 3000) player.seekTo(0)
         else player.seekToPreviousMediaItem()
+    }
+
+    // Queue API
+
+    // Add to queue (after current item + existing queue block)
+    fun addToQueue(track: PlaylistTrack) {
+        val mediaItem = buildMediaItems(listOf(track)).first()
+
+        val baseIndex = player.currentMediaItemIndex
+        val insertIndex = (baseIndex + 1 + queueList.size)
+            .coerceIn(0, player.mediaItemCount)
+
+        player.addMediaItem(insertIndex, mediaItem)
+
+        queueList.add(track)
+        _queue.value = queueList.toList()
+    }
+
+    // Play next (force to front of queue block)
+    fun playNext(track: PlaylistTrack) {
+        val mediaItem = buildMediaItems(listOf(track)).first()
+        val insertIndex = (player.currentMediaItemIndex + 1)
+            .coerceIn(0, player.mediaItemCount)
+        player.addMediaItem(insertIndex, mediaItem)
+
+        queueList.add(0, track)
+        _queue.value = queueList.toList()
+    }
+
+    fun clearQueue() {
+        val idsToRemove = queueList.map { it.id.toString() }.toSet()
+        val indicesToRemove = mutableListOf<Int>()
+        for (i in 0 until player.mediaItemCount) {
+            val id = player.getMediaItemAt(i).mediaId
+            if (id in idsToRemove) indicesToRemove.add(i)
+        }
+        indicesToRemove.sortedDescending().forEach { player.removeMediaItem(it) }
+
+        queueList.clear()
+        _queue.value = emptyList()
+    }
+
+    fun removeFromQueue(trackId: Long) {
+        val idStr = trackId.toString()
+        val indexInPlayer = (0 until player.mediaItemCount)
+            .firstOrNull { player.getMediaItemAt(it).mediaId == idStr }
+
+        if (indexInPlayer != null) {
+            player.removeMediaItem(indexInPlayer)
+        }
+
+        queueList.removeAll { it.id == trackId }
+        _queue.value = queueList.toList()
     }
 
     private fun buildLoadingNotification(): Notification =

@@ -1,22 +1,31 @@
 package com.aron.mediaplayer.service
 
 import androidx.media3.exoplayer.ExoPlayer
-import kotlinx.coroutines.*
+import com.aron.mediaplayer.data.PlaylistTrack
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /**
  * Singleton connection point between UI (ViewModels) and PlaybackService.
- * Exposes flows for current song, playback state, and playback position/duration.
+ * Exposes flows for current song, playback state, playback position/duration, and queue.
  */
 object PlaybackServiceConnection {
 
     // Already exposed from PlaybackService
     val currentUri: StateFlow<String?> get() = PlaybackService.currentUri
     val isPlaying: StateFlow<Boolean> get() = PlaybackService.isPlaying
-    val currentSong: StateFlow<com.aron.mediaplayer.data.PlaylistTrack?> get() = PlaybackService.currentSong
+    val currentSong: StateFlow<PlaylistTrack?> get() = PlaybackService.currentSong
 
-    // 🔹 New: playback position and duration
+    // Queue state
+    val queue: StateFlow<List<PlaylistTrack>> get() = PlaybackService.queue
+
+    // Playback position and duration
     private val _positionMs = MutableStateFlow(0L)
     val positionMs: StateFlow<Long> = _positionMs
 
@@ -29,6 +38,9 @@ object PlaybackServiceConnection {
     // Reference to the ExoPlayer inside PlaybackService
     private val player: ExoPlayer?
         get() = PlaybackService.player
+
+    private val service: PlaybackService?
+        get() = PlaybackService.instance
 
     init {
         // Poll position/duration every 500ms
@@ -43,7 +55,7 @@ object PlaybackServiceConnection {
         }
     }
 
-    // Controls
+    // Playback controls
     fun togglePlayPause() {
         player?.let { if (it.isPlaying) it.pause() else it.play() }
     }
@@ -58,5 +70,25 @@ object PlaybackServiceConnection {
 
     fun skipToPrevious() {
         player?.seekToPreviousMediaItem()
+    }
+
+    // Queue controls
+
+    // Add to queue
+    fun addToQueue(track: PlaylistTrack) {
+        service?.addToQueue(track)
+    }
+
+    // Play next
+    fun playNext(track: PlaylistTrack) {
+        service?.playNext(track)
+    }
+
+    fun clearQueue() {
+        service?.clearQueue()
+    }
+
+    fun removeFromQueue(trackId: Long) {
+        service?.removeFromQueue(trackId)
     }
 }

@@ -33,7 +33,6 @@ import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
 import com.aron.mediaplayer.data.ActivePlaylistStore
 import com.aron.mediaplayer.data.AppDatabase
-import com.aron.mediaplayer.data.PlaylistEntity
 import com.aron.mediaplayer.data.PlaylistTrack
 import com.aron.mediaplayer.service.PlaybackService
 import com.aron.mediaplayer.ui.components.FastScroller
@@ -58,7 +57,6 @@ fun PlaylistDetailScreen(
     val activeStore = remember { ActivePlaylistStore(context, dao.playlistDao()) }
     val scope = rememberCoroutineScope()
 
-    // Load playlist metadata once per ID
     LaunchedEffect(playlistId) {
         viewModel.loadPlaylist(playlistId)
     }
@@ -68,7 +66,6 @@ fun PlaylistDetailScreen(
     val searchText by viewModel.getSearchQuery().collectAsState()
     val playlists by dao.playlistDao().getAllPlaylists().collectAsState(initial = emptyList())
 
-    // Now playing state for highlighting current track
     val nowPlayingViewModel: NowPlayingViewModel = viewModel()
     val currentPlayingUri by nowPlayingViewModel.currentUri.collectAsState()
 
@@ -79,15 +76,13 @@ fun PlaylistDetailScreen(
     var showTrackOptionsSheet by remember { mutableStateOf(false) }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
+        modifier = Modifier.fillMaxSize()
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             state = listState
         ) {
 
-            // Compact header (Spotify-style)
             item {
                 Column(
                     modifier = Modifier
@@ -95,7 +90,6 @@ fun PlaylistDetailScreen(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Back + menu row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -215,7 +209,6 @@ fun PlaylistDetailScreen(
                 }
             }
 
-            // Empty state
             item {
                 if (tracks.isEmpty()) {
                     Box(
@@ -247,7 +240,6 @@ fun PlaylistDetailScreen(
                 }
             }
 
-            // Track list
             itemsIndexed(
                 tracks,
                 key = { _, track -> track.id }
@@ -262,6 +254,14 @@ fun PlaylistDetailScreen(
                             putExtra(PlaybackService.EXTRA_PLAYLIST_ID, playlistId)
                         }
                         ContextCompat.startForegroundService(context, intent)
+                    },
+                    onPlayNext = {
+                        nowPlayingViewModel.playNext(track)
+                        showTrackOptionsSheet = false
+                    },
+                    onAddToQueue = {
+                        nowPlayingViewModel.addToQueue(track)
+                        showTrackOptionsSheet = false
                     },
                     onMenuClick = {
                         targetSong = track
@@ -286,6 +286,28 @@ fun PlaylistDetailScreen(
         ModalBottomSheet(
             onDismissRequest = { showTrackOptionsSheet = false }
         ) {
+            ListItem(
+                headlineContent = { Text("Play next") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        nowPlayingViewModel.playNext(targetSong!!)
+                        showTrackOptionsSheet = false
+                    }
+                    .padding(vertical = 12.dp)
+            )
+
+            ListItem(
+                headlineContent = { Text("Add to queue") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        nowPlayingViewModel.addToQueue(targetSong!!)
+                        showTrackOptionsSheet = false
+                    }
+                    .padding(vertical = 12.dp)
+            )
+
             ListItem(
                 headlineContent = { Text("Remove from this playlist") },
                 modifier = Modifier

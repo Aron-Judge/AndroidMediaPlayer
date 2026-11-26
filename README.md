@@ -27,8 +27,17 @@ A lightweight Kotlin-based Android media player designed to scan local audio fil
 ### Screens & UI Flow
 
 - **Library** – Displays all detected songs.
+  ![image alt](https://github.com/Aron-Judge/AndroidMediaPlayer/blob/33460cb44c4af2ad119b0dc4fa630c7e05cc23da/screenshots/library.png)
+  
 - **Playlists** – Create, rename, delete, and reorder playlists.
+  ![image alt](https://github.com/Aron-Judge/AndroidMediaPlayer/blob/33460cb44c4af2ad119b0dc4fa630c7e05cc23da/screenshots/playlists.png)
+  
 - **Now Playing** – Artwork, scrubber, and playback controls.
+  ![image alt](https://github.com/Aron-Judge/AndroidMediaPlayer/blob/33460cb44c4af2ad119b0dc4fa630c7e05cc23da/screenshots/nowplaying.png)
+  
+- **Notification Control** -
+  ![image alt](https://github.com/Aron-Judge/AndroidMediaPlayer/blob/33460cb44c4af2ad119b0dc4fa630c7e05cc23da/screenshots/notification.png)
+  
 - **Folder Picker** – Import songs from a selected folder.
 
 ---

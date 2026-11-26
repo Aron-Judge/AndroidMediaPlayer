@@ -92,6 +92,20 @@ These are required for scanning songs and showing playback notifications.
 
 ---
 
+### What I Learned
+
+Developing this project gave me practical experience with:
+
+- Jetpack Compose UI development
+- Android MediaStore integration
+- State management and reactive UI updates
+- Media sessions and background playback
+- Application architecture using ViewModels
+- Git and GitHub workflows
+- Debugging and testing Android applications
+
+---
+
 ### License
 
 ```
